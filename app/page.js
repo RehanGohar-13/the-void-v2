@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "../lib/supabaseClient";
 import Auth from "../components/Auth";
+import Chat from "../components/Chat";
 
 export default function Home() {
   const [user, setUser] = useState(null);
@@ -31,30 +32,14 @@ export default function Home() {
           justifyContent: "center",
           alignItems: "center",
           color: "#9B30FF",
-          fontSize: "24px",
+          fontSize: "14px",
           fontFamily: "Segoe UI, Arial, sans-serif",
+          letterSpacing: "4px",
         }}
       >
-        INITIALIZING...
+        INITIALIZING THE VOID...
       </div>
     );
 
-  return user ? (
-    <div
-      style={{
-        minHeight: "100vh",
-        backgroundColor: "#000000",
-        display: "flex",
-        justifyContent: "center",
-        alignItems: "center",
-        color: "#9B30FF",
-        fontSize: "24px",
-        fontFamily: "Segoe UI, Arial, sans-serif",
-      }}
-    >
-      Welcome {user.user_metadata?.username || user.email}! Chat coming soon...
-    </div>
-  ) : (
-    <Auth />
-  );
+  return user ? <Chat user={user} /> : <Auth />;
 }
