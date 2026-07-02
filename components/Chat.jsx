@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import { supabase } from "../lib/supabaseClient";
 import DirectMessages from "./DirectMessages";
@@ -11,67 +11,52 @@ export default function Chat({ user }) {
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState("chat");
   const bottomRef = useRef(null);
-  const channelRef = useRef(null);
   const username = user.user_metadata?.username || user.email;
 
-  const cleanupChannel = useCallback(async () => {
-    if (channelRef.current) {
-      await supabase.removeChannel(channelRef.current);
-      channelRef.current = null;
-    }
-  }, []);
-
-  const setupChannel = useCallback(async () => {
-    await cleanupChannel();
-
-    const { data } = await supabase
-      .from("messages")
-      .select("*")
-      .order("created_at", { ascending: true })
-      .limit(100);
-
-    setMessages(data || []);
-    setLoading(false);
-
-    const channel = supabase
-      .channel("group-chat")
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "messages",
-        },
-        (payload) => {
-          setMessages((prev) => [...prev, payload.new]);
-        },
-      )
-      .subscribe();
-
-    channelRef.current = channel;
-  }, [cleanupChannel]);
-
+  // Load messages and poll every 5 seconds
   useEffect(() => {
-    setupChannel();
-    return () => {
-      cleanupChannel();
-    };
-  }, []);
+    let interval;
+    let mounted = true;
 
+    async function loadMessages() {
+      const { data } = await supabase
+        .from("messages")
+        .select("*")
+        .order("created_at", { ascending: true })
+        .limit(100);
+
+      if (mounted && data) {
+        setMessages(data);
+        setLoading(false);
+      }
+    }
+
+    loadMessages();
+
+    interval = setInterval(() => {
+      if (mounted && view === "chat") {
+        loadMessages();
+      }
+    }, 5000);
+
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+    };
+  }, [view]);
+
+  // Auto scroll
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  async function handleViewChange(newView) {
+  // Switch views
+  function handleViewChange(newView) {
     if (newView === view) return;
-    if (newView === "dms") {
-      await cleanupChannel();
-    } else {
-      await setupChannel();
-    }
     setView(newView);
   }
 
+  // Send message
   async function sendMessage(e) {
     e.preventDefault();
     const content = text.trim();
@@ -104,10 +89,7 @@ export default function Chat({ user }) {
       }}
     >
       {/* ── SIDEBAR ── */}
-      <motion.div
-        initial={{ opacity: 0, x: -40 }}
-        animate={{ opacity: 1, x: 0 }}
-        transition={{ duration: 0.6 }}
+      <div
         style={{
           width: "220px",
           backgroundColor: "#050508",
@@ -118,6 +100,7 @@ export default function Chat({ user }) {
           position: "relative",
         }}
       >
+        {/* Top accent */}
         <div
           style={{
             position: "absolute",
@@ -273,9 +256,7 @@ export default function Chat({ user }) {
         </div>
 
         {/* Logout */}
-        <motion.button
-          whileHover={{ scale: 1.02 }}
-          whileTap={{ scale: 0.98 }}
+        <button
           onClick={() => supabase.auth.signOut()}
           style={{
             padding: "12px",
@@ -301,8 +282,8 @@ export default function Chat({ user }) {
           }}
         >
           DISCONNECT
-        </motion.button>
-      </motion.div>
+        </button>
+      </div>
 
       {/* ── MAIN CONTENT ── */}
       {view === "chat" ? (
@@ -440,8 +421,6 @@ export default function Chat({ user }) {
                         fontSize: "11px",
                         letterSpacing: "1px",
                         marginBottom: "4px",
-                        paddingLeft: isOwn ? 0 : "4px",
-                        paddingRight: isOwn ? "4px" : 0,
                       }}
                     >
                       {isOwn ? "YOU" : msg.username}
@@ -525,7 +504,6 @@ export default function Chat({ user }) {
                   fontSize: "14px",
                   outline: "none",
                   letterSpacing: "0.5px",
-                  transition: "border-color 0.3s",
                 }}
                 onFocus={(e) => (e.target.style.borderColor = "#9B30FF")}
                 onBlur={(e) => (e.target.style.borderColor = "#1a1a3a")}
