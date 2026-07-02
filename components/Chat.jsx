@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { motion } from "framer-motion";
 import { supabase } from "../lib/supabaseClient";
 import DirectMessages from "./DirectMessages";
 
@@ -11,70 +11,66 @@ export default function Chat({ user }) {
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState("chat");
   const bottomRef = useRef(null);
+  const channelRef = useRef(null);
   const username = user.user_metadata?.username || user.email;
 
+  const cleanupChannel = useCallback(async () => {
+    if (channelRef.current) {
+      await supabase.removeChannel(channelRef.current);
+      channelRef.current = null;
+    }
+  }, []);
+
+  const setupChannel = useCallback(async () => {
+    await cleanupChannel();
+
+    const { data } = await supabase
+      .from("messages")
+      .select("*")
+      .order("created_at", { ascending: true })
+      .limit(100);
+
+    setMessages(data || []);
+    setLoading(false);
+
+    const channel = supabase
+      .channel("group-chat")
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "messages",
+        },
+        (payload) => {
+          setMessages((prev) => [...prev, payload.new]);
+        },
+      )
+      .subscribe();
+
+    channelRef.current = channel;
+  }, [cleanupChannel]);
+
   useEffect(() => {
-    let channel;
-    let mounted = true;
-
-    function handleViewChange(newView) {
-      if (newView === view) return;
-      // Small delay to let old channel clean up properly
-      setLoading(true);
-      setTimeout(() => {
-        setView(newView);
-        setLoading(false);
-      }, 300);
-    }
-
-    async function init() {
-      try {
-        const { data, error } = await supabase
-          .from("messages")
-          .select("*")
-          .order("created_at", { ascending: true })
-          .limit(100);
-
-        if (!mounted) return;
-        if (!error) setMessages(data || []);
-        setLoading(false);
-
-        channel = supabase.channel("void:messages:" + Date.now()).on(
-          "postgres_changes",
-          {
-            event: "INSERT",
-            schema: "public",
-            table: "messages",
-          },
-          (payload) => {
-            if (mounted) {
-              setMessages((prev) => [...prev, payload.new]);
-            }
-          },
-        );
-
-        await channel.subscribe();
-      } catch (err) {
-        console.error("Channel error:", err);
-      }
-    }
-
-    if (view === "chat") {
-      init();
-    }
-
+    setupChannel();
     return () => {
-      mounted = false;
-      if (channel) {
-        supabase.removeChannel(channel);
-        channel = null;
-      }
+      cleanupChannel();
     };
-  }, [view]);
+  }, []);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  async function handleViewChange(newView) {
+    if (newView === view) return;
+    if (newView === "dms") {
+      await cleanupChannel();
+    } else {
+      await setupChannel();
+    }
+    setView(newView);
+  }
 
   async function sendMessage(e) {
     e.preventDefault();
@@ -82,16 +78,11 @@ export default function Chat({ user }) {
     if (!content) return;
     setText("");
 
-    const { error } = await supabase.from("messages").insert({
-      content,
-      username,
-      user_id: user.id,
-    });
+    const { error } = await supabase
+      .from("messages")
+      .insert({ content, username, user_id: user.id });
 
-    if (error) {
-      console.error(error);
-      setText(content);
-    }
+    if (error) setText(content);
   }
 
   function formatTime(timestamp) {
@@ -216,7 +207,7 @@ export default function Chat({ user }) {
           </div>
         </div>
 
-        {/* Navigation */}
+        {/* Channels */}
         <div
           style={{
             color: "#2a2a3a",
@@ -296,6 +287,7 @@ export default function Chat({ user }) {
             letterSpacing: "2px",
             cursor: "pointer",
             transition: "all 0.3s",
+            marginTop: "20px",
           }}
           onMouseOver={(e) => {
             e.currentTarget.style.borderColor = "#440000";
@@ -319,14 +311,10 @@ export default function Chat({ user }) {
             flex: 1,
             display: "flex",
             flexDirection: "column",
-            position: "relative",
           }}
         >
           {/* Header */}
-          <motion.div
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.2 }}
+          <div
             style={{
               padding: "20px 30px",
               borderBottom: "1px solid #0d0d1a",
@@ -385,7 +373,7 @@ export default function Chat({ user }) {
                 LIVE
               </div>
             </div>
-          </motion.div>
+          </div>
 
           {/* Messages */}
           <div
@@ -413,9 +401,7 @@ export default function Chat({ user }) {
             )}
 
             {!loading && messages.length === 0 && (
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
+              <div
                 style={{
                   textAlign: "center",
                   color: "#2a2a3a",
@@ -429,96 +415,88 @@ export default function Chat({ user }) {
                 <span style={{ fontSize: "11px" }}>
                   Be the first to transmit.
                 </span>
-              </motion.div>
+              </div>
             )}
 
-            <AnimatePresence>
-              {messages.map((msg, i) => {
-                const isOwn = msg.user_id === user.id;
-                const showName =
-                  i === 0 || messages[i - 1]?.user_id !== msg.user_id;
+            {messages.map((msg, i) => {
+              const isOwn = msg.user_id === user.id;
+              const showName =
+                i === 0 || messages[i - 1]?.user_id !== msg.user_id;
 
-                return (
-                  <motion.div
-                    key={msg.id}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.2 }}
+              return (
+                <div
+                  key={msg.id}
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: isOwn ? "flex-end" : "flex-start",
+                    marginTop: showName ? "16px" : "2px",
+                  }}
+                >
+                  {showName && (
+                    <div
+                      style={{
+                        color: isOwn ? "#9B30FF" : "#00BFFF",
+                        fontSize: "11px",
+                        letterSpacing: "1px",
+                        marginBottom: "4px",
+                        paddingLeft: isOwn ? 0 : "4px",
+                        paddingRight: isOwn ? "4px" : 0,
+                      }}
+                    >
+                      {isOwn ? "YOU" : msg.username}
+                    </div>
+                  )}
+
+                  <div
                     style={{
                       display: "flex",
-                      flexDirection: "column",
-                      alignItems: isOwn ? "flex-end" : "flex-start",
-                      marginTop: showName ? "16px" : "2px",
+                      alignItems: "flex-end",
+                      gap: "8px",
+                      flexDirection: isOwn ? "row-reverse" : "row",
                     }}
                   >
-                    {showName && (
-                      <div
-                        style={{
-                          color: isOwn ? "#9B30FF" : "#00BFFF",
-                          fontSize: "11px",
-                          letterSpacing: "1px",
-                          marginBottom: "4px",
-                          paddingLeft: isOwn ? 0 : "4px",
-                          paddingRight: isOwn ? "4px" : 0,
-                        }}
-                      >
-                        {isOwn ? "YOU" : msg.username}
-                      </div>
-                    )}
+                    <div
+                      style={{
+                        maxWidth: "460px",
+                        padding: "10px 16px",
+                        borderRadius: isOwn
+                          ? "16px 4px 16px 16px"
+                          : "4px 16px 16px 16px",
+                        background: isOwn
+                          ? "linear-gradient(135deg, #4B0082, #9B30FF)"
+                          : "#0a0a15",
+                        border: isOwn ? "none" : "1px solid #1a1a3a",
+                        color: "#ffffff",
+                        fontSize: "14px",
+                        lineHeight: "1.5",
+                        boxShadow: isOwn
+                          ? "0 4px 20px rgba(155,48,255,0.2)"
+                          : "none",
+                      }}
+                    >
+                      {msg.content}
+                    </div>
 
                     <div
                       style={{
-                        display: "flex",
-                        alignItems: "flex-end",
-                        gap: "8px",
-                        flexDirection: isOwn ? "row-reverse" : "row",
+                        color: "#2a2a3a",
+                        fontSize: "10px",
+                        whiteSpace: "nowrap",
                       }}
                     >
-                      <div
-                        style={{
-                          maxWidth: "460px",
-                          padding: "10px 16px",
-                          borderRadius: isOwn
-                            ? "16px 4px 16px 16px"
-                            : "4px 16px 16px 16px",
-                          background: isOwn
-                            ? "linear-gradient(135deg, #4B0082, #9B30FF)"
-                            : "#0a0a15",
-                          border: isOwn ? "none" : "1px solid #1a1a3a",
-                          color: "#ffffff",
-                          fontSize: "14px",
-                          lineHeight: "1.5",
-                          boxShadow: isOwn
-                            ? "0 4px 20px rgba(155,48,255,0.2)"
-                            : "none",
-                        }}
-                      >
-                        {msg.content}
-                      </div>
-
-                      <div
-                        style={{
-                          color: "#2a2a3a",
-                          fontSize: "10px",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {formatTime(msg.created_at)}
-                      </div>
+                      {formatTime(msg.created_at)}
                     </div>
-                  </motion.div>
-                );
-              })}
-            </AnimatePresence>
+                  </div>
+                </div>
+              );
+            })}
 
             <div ref={bottomRef} />
           </div>
 
           {/* Input */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.3 }}
+          <div
             style={{
               padding: "20px 30px",
               borderTop: "1px solid #0d0d1a",
@@ -574,7 +552,7 @@ export default function Chat({ user }) {
                 TRANSMIT
               </motion.button>
             </form>
-          </motion.div>
+          </div>
         </div>
       ) : (
         <DirectMessages currentUser={user} />
