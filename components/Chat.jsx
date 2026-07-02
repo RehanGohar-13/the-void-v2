@@ -17,6 +17,16 @@ export default function Chat({ user }) {
     let channel;
     let mounted = true;
 
+    function handleViewChange(newView) {
+      if (newView === view) return;
+      // Small delay to let old channel clean up properly
+      setLoading(true);
+      setTimeout(() => {
+        setView(newView);
+        setLoading(false);
+      }, 300);
+    }
+
     async function init() {
       try {
         const { data, error } = await supabase
@@ -219,7 +229,7 @@ export default function Chat({ user }) {
         </div>
 
         <div
-          onClick={() => setView("chat")}
+          onClick={() => handleViewChange("chat")}
           style={{
             padding: "10px 14px",
             backgroundColor:
@@ -252,7 +262,7 @@ export default function Chat({ user }) {
         </div>
 
         <div
-          onClick={() => setView("dms")}
+          onClick={() => handleViewChange("dms")}
           style={{
             padding: "10px 14px",
             backgroundColor:
