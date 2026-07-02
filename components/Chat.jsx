@@ -15,38 +15,52 @@ export default function Chat({ user }) {
 
   useEffect(() => {
     let channel;
+    let mounted = true;
 
     async function init() {
-      const { data, error } = await supabase
-        .from("messages")
-        .select("*")
-        .order("created_at", { ascending: true })
-        .limit(100);
+      try {
+        const { data, error } = await supabase
+          .from("messages")
+          .select("*")
+          .order("created_at", { ascending: true })
+          .limit(100);
 
-      if (!error) setMessages(data || []);
-      setLoading(false);
+        if (!mounted) return;
+        if (!error) setMessages(data || []);
+        setLoading(false);
 
-      channel = supabase.channel("void:messages:" + Date.now()).on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "messages",
-        },
-        (payload) => {
-          setMessages((prev) => [...prev, payload.new]);
-        },
-      );
+        channel = supabase.channel("void:messages:" + Date.now()).on(
+          "postgres_changes",
+          {
+            event: "INSERT",
+            schema: "public",
+            table: "messages",
+          },
+          (payload) => {
+            if (mounted) {
+              setMessages((prev) => [...prev, payload.new]);
+            }
+          },
+        );
 
-      await channel.subscribe();
+        await channel.subscribe();
+      } catch (err) {
+        console.error("Channel error:", err);
+      }
     }
 
-    init();
+    if (view === "chat") {
+      init();
+    }
 
     return () => {
-      if (channel) supabase.removeChannel(channel);
+      mounted = false;
+      if (channel) {
+        supabase.removeChannel(channel);
+        channel = null;
+      }
     };
-  }, []);
+  }, [view]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
