@@ -10,18 +10,83 @@ export default function Chat({ user }) {
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState("chat");
+  const [rooms, setRooms] = useState([]);
+  const [activeRoom, setActiveRoom] = useState(null);
+  const [onlineUsers, setOnlineUsers] = useState([]);
+  const [showNewRoom, setShowNewRoom] = useState(false);
+  const [newRoomName, setNewRoomName] = useState("");
   const bottomRef = useRef(null);
   const username = user.user_metadata?.username || user.email;
 
-  // Load messages and poll every 5 seconds
+  // Load rooms on mount
+  useEffect(() => {
+    async function loadRooms() {
+      const { data } = await supabase
+        .from("rooms")
+        .select("*")
+        .order("created_at", { ascending: true });
+
+      if (data && data.length > 0) {
+        setRooms(data);
+        setActiveRoom(data[0]);
+      }
+    }
+    loadRooms();
+  }, []);
+
+  // Update presence
+  useEffect(() => {
+    async function updatePresence() {
+      await supabase.from("presence").upsert({
+        user_id: user.id,
+        username: username,
+        status: "online",
+        last_seen: new Date().toISOString(),
+      });
+    }
+
+    updatePresence();
+
+    const interval = setInterval(updatePresence, 30000);
+
+    return () => clearInterval(interval);
+  }, [user.id, username]);
+
+  // Poll online users
+  useEffect(() => {
+    let mounted = true;
+
+    async function loadOnline() {
+      const cutoff = new Date(Date.now() - 60000).toISOString();
+      const { data } = await supabase
+        .from("presence")
+        .select("*")
+        .gte("last_seen", cutoff);
+
+      if (mounted) setOnlineUsers(data || []);
+    }
+
+    loadOnline();
+    const interval = setInterval(loadOnline, 10000);
+
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+    };
+  }, []);
+
+  // Poll messages for active room
   useEffect(() => {
     let interval;
     let mounted = true;
 
     async function loadMessages() {
+      if (!activeRoom) return;
+
       const { data } = await supabase
         .from("messages")
         .select("*")
+        .eq("room_id", activeRoom.id)
         .order("created_at", { ascending: true })
         .limit(100);
 
@@ -31,41 +96,67 @@ export default function Chat({ user }) {
       }
     }
 
-    loadMessages();
-
-    interval = setInterval(() => {
-      if (mounted && view === "chat") {
-        loadMessages();
-      }
-    }, 5000);
+    if (view === "chat" && activeRoom) {
+      loadMessages();
+      interval = setInterval(loadMessages, 5000);
+    }
 
     return () => {
       mounted = false;
-      clearInterval(interval);
+      if (interval) clearInterval(interval);
     };
-  }, [view]);
+  }, [view, activeRoom]);
 
-  // Auto scroll
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Switch views
   function handleViewChange(newView) {
     if (newView === view) return;
     setView(newView);
   }
 
-  // Send message
+  function switchRoom(room) {
+    setActiveRoom(room);
+    setMessages([]);
+    setLoading(true);
+    setView("chat");
+  }
+
+  async function createRoom() {
+    const name = newRoomName.trim().toLowerCase();
+    if (!name) return;
+
+    const { data, error } = await supabase
+      .from("rooms")
+      .insert({
+        name: name,
+        created_by: user.id,
+      })
+      .select()
+      .single();
+
+    if (!error && data) {
+      setRooms((prev) => [...prev, data]);
+      setActiveRoom(data);
+      setNewRoomName("");
+      setShowNewRoom(false);
+      setView("chat");
+    }
+  }
+
   async function sendMessage(e) {
     e.preventDefault();
     const content = text.trim();
-    if (!content) return;
+    if (!content || !activeRoom) return;
     setText("");
 
-    const { error } = await supabase
-      .from("messages")
-      .insert({ content, username, user_id: user.id });
+    const { error } = await supabase.from("messages").insert({
+      content,
+      username,
+      user_id: user.id,
+      room_id: activeRoom.id,
+    });
 
     if (error) setText(content);
   }
@@ -75,6 +166,14 @@ export default function Chat({ user }) {
     const hours = date.getHours().toString().padStart(2, "0");
     const minutes = date.getMinutes().toString().padStart(2, "0");
     return `${hours}:${minutes}`;
+  }
+
+  async function handleLogout() {
+    await supabase
+      .from("presence")
+      .update({ status: "offline", last_seen: new Date().toISOString() })
+      .eq("user_id", user.id);
+    await supabase.auth.signOut();
   }
 
   return (
@@ -99,7 +198,6 @@ export default function Chat({ user }) {
           position: "relative",
         }}
       >
-        {/* Top accent */}
         <div
           style={{
             position: "absolute",
@@ -113,7 +211,7 @@ export default function Chat({ user }) {
         />
 
         {/* Logo */}
-        <div style={{ marginBottom: "40px" }}>
+        <div style={{ marginBottom: "30px" }}>
           <div
             style={{
               fontSize: "22px",
@@ -189,7 +287,7 @@ export default function Chat({ user }) {
           </div>
         </div>
 
-        {/* Channels */}
+        {/* Online Users */}
         <div
           style={{
             color: "#2a2a3a",
@@ -198,30 +296,149 @@ export default function Chat({ user }) {
             marginBottom: "8px",
           }}
         >
-          CHANNELS
+          ONLINE — {onlineUsers.length}
         </div>
 
         <div
-          onClick={() => handleViewChange("chat")}
           style={{
-            padding: "10px 14px",
-            backgroundColor:
-              view === "chat" ? "rgba(155,48,255,0.1)" : "transparent",
-            borderRadius: "6px",
-            border: "1px solid",
-            borderColor:
-              view === "chat" ? "rgba(155,48,255,0.2)" : "transparent",
-            color: view === "chat" ? "#9B30FF" : "#2a2a3a",
-            fontSize: "13px",
-            letterSpacing: "1px",
-            marginBottom: "4px",
-            cursor: "pointer",
-            transition: "all 0.2s",
+            marginBottom: "16px",
+            maxHeight: "80px",
+            overflowY: "auto",
           }}
         >
-          # the-void
+          {onlineUsers.map((u) => (
+            <div
+              key={u.user_id}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                padding: "4px 8px",
+                fontSize: "11px",
+                color: u.user_id === user.id ? "#9B30FF" : "#4a4a6a",
+              }}
+            >
+              <div
+                style={{
+                  width: "6px",
+                  height: "6px",
+                  borderRadius: "50%",
+                  backgroundColor: "#00ff00",
+                }}
+              />
+              {u.username}
+            </div>
+          ))}
         </div>
 
+        {/* Channels */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: "8px",
+          }}
+        >
+          <div
+            style={{
+              color: "#2a2a3a",
+              fontSize: "10px",
+              letterSpacing: "2px",
+            }}
+          >
+            CHANNELS
+          </div>
+          <button
+            onClick={() => setShowNewRoom(!showNewRoom)}
+            style={{
+              background: "transparent",
+              border: "none",
+              color: "#9B30FF",
+              fontSize: "18px",
+              cursor: "pointer",
+              padding: "0 4px",
+            }}
+          >
+            +
+          </button>
+        </div>
+
+        {/* New Room Input */}
+        {showNewRoom && (
+          <div
+            style={{
+              display: "flex",
+              gap: "4px",
+              marginBottom: "8px",
+            }}
+          >
+            <input
+              value={newRoomName}
+              onChange={(e) => setNewRoomName(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && createRoom()}
+              placeholder="room name"
+              style={{
+                flex: 1,
+                padding: "6px 10px",
+                backgroundColor: "#0a0a15",
+                border: "1px solid #1a1a3a",
+                borderRadius: "4px",
+                color: "#ffffff",
+                fontSize: "11px",
+                outline: "none",
+              }}
+            />
+            <button
+              onClick={createRoom}
+              style={{
+                padding: "6px 10px",
+                border: "none",
+                borderRadius: "4px",
+                background: "#9B30FF",
+                color: "white",
+                fontSize: "10px",
+                cursor: "pointer",
+              }}
+            >
+              ADD
+            </button>
+          </div>
+        )}
+
+        {/* Room List */}
+        {rooms.map((room) => (
+          <div
+            key={room.id}
+            onClick={() => switchRoom(room)}
+            style={{
+              padding: "8px 14px",
+              backgroundColor:
+                activeRoom?.id === room.id && view === "chat"
+                  ? "rgba(155,48,255,0.1)"
+                  : "transparent",
+              borderRadius: "6px",
+              border: "1px solid",
+              borderColor:
+                activeRoom?.id === room.id && view === "chat"
+                  ? "rgba(155,48,255,0.2)"
+                  : "transparent",
+              color:
+                activeRoom?.id === room.id && view === "chat"
+                  ? "#9B30FF"
+                  : "#2a2a3a",
+              fontSize: "13px",
+              letterSpacing: "1px",
+              marginBottom: "2px",
+              cursor: "pointer",
+              transition: "all 0.2s",
+            }}
+          >
+            # {room.name}
+          </div>
+        ))}
+
+        {/* DMs */}
         <div
           style={{
             color: "#2a2a3a",
@@ -237,7 +454,7 @@ export default function Chat({ user }) {
         <div
           onClick={() => handleViewChange("dms")}
           style={{
-            padding: "10px 14px",
+            padding: "8px 14px",
             backgroundColor:
               view === "dms" ? "rgba(0,191,255,0.1)" : "transparent",
             borderRadius: "6px",
@@ -256,7 +473,7 @@ export default function Chat({ user }) {
 
         {/* Logout */}
         <button
-          onClick={() => supabase.auth.signOut()}
+          onClick={handleLogout}
           style={{
             padding: "12px",
             backgroundColor: "transparent",
@@ -313,7 +530,7 @@ export default function Chat({ user }) {
                   letterSpacing: "2px",
                 }}
               >
-                # the-void
+                # {activeRoom?.name || "loading"}
               </div>
               <div
                 style={{
@@ -323,7 +540,7 @@ export default function Chat({ user }) {
                   marginTop: "2px",
                 }}
               >
-                ENCRYPTED GROUP CHANNEL
+                ENCRYPTED CHANNEL
               </div>
             </div>
 
@@ -390,7 +607,7 @@ export default function Chat({ user }) {
                   marginTop: "40px",
                 }}
               >
-                THE VOID IS SILENT.
+                THIS CHANNEL IS SILENT.
                 <br />
                 <span style={{ fontSize: "11px" }}>
                   Be the first to transmit.
@@ -492,7 +709,7 @@ export default function Chat({ user }) {
               <input
                 value={text}
                 onChange={(e) => setText(e.target.value)}
-                placeholder="Transmit a message..."
+                placeholder={`Transmit to #${activeRoom?.name || ""}...`}
                 style={{
                   flex: 1,
                   padding: "14px 20px",
