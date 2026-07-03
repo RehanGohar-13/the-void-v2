@@ -6,6 +6,9 @@ import { supabase } from "../lib/supabaseClient";
 import DirectMessages from "./DirectMessages";
 import ContextMenu from "./ContextMenu";
 import MessageMenu from "./MessageMenu";
+import MobileNav from "./MobileNav";
+import OnlinePanel from "./OnlinePanel";
+import MobileSettings from "./MobileSettings";
 
 export default function Chat({ user }) {
   const [messages, setMessages] = useState([]);
@@ -23,6 +26,7 @@ export default function Chat({ user }) {
   const [messageMenu, setMessageMenu] = useState(null);
   const [replyTo, setReplyTo] = useState(null);
   const [typingUsers, setTypingUsers] = useState([]);
+  const [isMobile, setIsMobile] = useState(false);
 
   // Load rooms on mount
   useEffect(() => {
@@ -145,6 +149,16 @@ export default function Chat({ user }) {
       if (interval) clearInterval(interval);
     };
   }, [view, activeRoom, user.id]);
+
+  // Detect mobile
+  useEffect(() => {
+    function checkMobile() {
+      setIsMobile(window.innerWidth < 768);
+    }
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
 
   function handleViewChange(newView) {
     if (newView === view) return;
@@ -284,41 +298,347 @@ export default function Chat({ user }) {
         minHeight: "100vh",
         backgroundColor: "#000000",
         display: "flex",
+        flexDirection: isMobile ? "column" : "row",
         fontFamily: "Segoe UI, Arial, sans-serif",
         overflow: "hidden",
       }}
     >
       {/* ── SIDEBAR ── */}
-      <div
-        style={{
-          width: "220px",
-          backgroundColor: "#050508",
-          borderRight: "1px solid #0d0d1a",
-          display: "flex",
-          flexDirection: "column",
-          padding: "30px 20px",
-          position: "relative",
-        }}
-      >
+      {!isMobile && (
         <div
           style={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            right: 0,
-            height: "2px",
-            background:
-              "linear-gradient(90deg, transparent, #9B30FF, #00BFFF, transparent)",
+            width: "220px",
+            backgroundColor: "#050508",
+            borderRight: "1px solid #0d0d1a",
+            display: "flex",
+            flexDirection: "column",
+            padding: "30px 20px",
+            position: "relative",
           }}
-        />
-
-        {/* Logo */}
-        <div style={{ marginBottom: "30px" }}>
+        >
           <div
             style={{
-              fontSize: "22px",
+              position: "absolute",
+              top: 0,
+              left: 0,
+              right: 0,
+              height: "2px",
+              background:
+                "linear-gradient(90deg, transparent, #9B30FF, #00BFFF, transparent)",
+            }}
+          />
+
+          {/* Logo */}
+          <div style={{ marginBottom: "30px" }}>
+            <div
+              style={{
+                fontSize: "22px",
+                fontWeight: "900",
+                letterSpacing: "6px",
+                background: "linear-gradient(135deg, #9B30FF, #00BFFF)",
+                WebkitBackgroundClip: "text",
+                WebkitTextFillColor: "transparent",
+                backgroundClip: "text",
+              }}
+            >
+              THE VOID
+            </div>
+            <div
+              style={{
+                color: "#2a2a3a",
+                fontSize: "9px",
+                letterSpacing: "2px",
+                marginTop: "4px",
+              }}
+            >
+              V2.0
+            </div>
+          </div>
+
+          {/* User info */}
+          <div
+            style={{
+              padding: "12px 16px",
+              backgroundColor: "#0a0a15",
+              borderRadius: "8px",
+              border: "1px solid #1a1a3a",
+              marginBottom: "20px",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+                marginBottom: "4px",
+              }}
+            >
+              <div
+                style={{
+                  width: "8px",
+                  height: "8px",
+                  borderRadius: "50%",
+                  backgroundColor: "#00ff00",
+                  boxShadow: "0 0 6px #00ff00",
+                }}
+              />
+              <div
+                style={{
+                  color: "#9B30FF",
+                  fontSize: "13px",
+                  fontWeight: "600",
+                  letterSpacing: "1px",
+                }}
+              >
+                {username}
+              </div>
+            </div>
+            <div
+              style={{
+                color: "#2a2a3a",
+                fontSize: "10px",
+                letterSpacing: "1px",
+                paddingLeft: "16px",
+              }}
+            >
+              ONLINE
+            </div>
+          </div>
+
+          {/* Online Users */}
+          <div
+            style={{
+              color: "#2a2a3a",
+              fontSize: "10px",
+              letterSpacing: "2px",
+              marginBottom: "8px",
+            }}
+          >
+            ONLINE — {onlineUsers.length}
+          </div>
+
+          <div
+            style={{
+              marginBottom: "16px",
+              maxHeight: "80px",
+              overflowY: "auto",
+            }}
+          >
+            {onlineUsers.map((u) => (
+              <div
+                key={u.user_id}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: "4px 8px",
+                  fontSize: "11px",
+                  color: u.user_id === user.id ? "#9B30FF" : "#4a4a6a",
+                }}
+              >
+                <div
+                  style={{
+                    width: "6px",
+                    height: "6px",
+                    borderRadius: "50%",
+                    backgroundColor: "#00ff00",
+                  }}
+                />
+                {u.username}
+              </div>
+            ))}
+          </div>
+
+          {/* Channels */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              marginBottom: "8px",
+            }}
+          >
+            <div
+              style={{
+                color: "#2a2a3a",
+                fontSize: "10px",
+                letterSpacing: "2px",
+              }}
+            >
+              CHANNELS
+            </div>
+            <button
+              onClick={() => setShowNewRoom(!showNewRoom)}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: "#9B30FF",
+                fontSize: "18px",
+                cursor: "pointer",
+                padding: "0 4px",
+              }}
+            >
+              +
+            </button>
+          </div>
+
+          {/* New Room Input */}
+          {showNewRoom && (
+            <div
+              style={{
+                display: "flex",
+                gap: "4px",
+                marginBottom: "8px",
+              }}
+            >
+              <input
+                value={newRoomName}
+                onChange={(e) => setNewRoomName(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && createRoom()}
+                placeholder="room name"
+                style={{
+                  flex: 1,
+                  padding: "6px 10px",
+                  backgroundColor: "#0a0a15",
+                  border: "1px solid #1a1a3a",
+                  borderRadius: "4px",
+                  color: "#ffffff",
+                  fontSize: "11px",
+                  outline: "none",
+                }}
+              />
+              <button
+                onClick={createRoom}
+                style={{
+                  padding: "6px 10px",
+                  border: "none",
+                  borderRadius: "4px",
+                  background: "#9B30FF",
+                  color: "white",
+                  fontSize: "10px",
+                  cursor: "pointer",
+                }}
+              >
+                ADD
+              </button>
+            </div>
+          )}
+
+          {/* Room List */}
+          {rooms.map((room) => (
+            <div
+              key={room.id}
+              onClick={() => switchRoom(room)}
+              onContextMenu={(e) => handleRightClick(e, room)}
+              style={{
+                padding: "8px 14px",
+                backgroundColor:
+                  activeRoom?.id === room.id && view === "chat"
+                    ? `${room.color || "#9B30FF"}15`
+                    : "transparent",
+                borderRadius: "6px",
+                border: "1px solid",
+                borderColor:
+                  activeRoom?.id === room.id && view === "chat"
+                    ? `${room.color || "#9B30FF"}40`
+                    : "transparent",
+                color:
+                  activeRoom?.id === room.id && view === "chat"
+                    ? room.color || "#9B30FF"
+                    : "#2a2a3a",
+                fontSize: "13px",
+                letterSpacing: "1px",
+                marginBottom: "2px",
+                cursor: "pointer",
+                transition: "all 0.2s",
+              }}
+            >
+              {room.icon || "#"} {room.name}
+            </div>
+          ))}
+
+          {/* DMs */}
+          <div
+            style={{
+              color: "#2a2a3a",
+              fontSize: "10px",
+              letterSpacing: "2px",
+              marginBottom: "8px",
+              marginTop: "16px",
+            }}
+          >
+            DIRECT MESSAGES
+          </div>
+
+          <div
+            onClick={() => handleViewChange("dms")}
+            style={{
+              padding: "8px 14px",
+              backgroundColor:
+                view === "dms" ? "rgba(0,191,255,0.1)" : "transparent",
+              borderRadius: "6px",
+              border: "1px solid",
+              borderColor:
+                view === "dms" ? "rgba(0,191,255,0.2)" : "transparent",
+              color: view === "dms" ? "#00BFFF" : "#2a2a3a",
+              fontSize: "13px",
+              letterSpacing: "1px",
+              marginBottom: "auto",
+              cursor: "pointer",
+              transition: "all 0.2s",
+            }}
+          >
+            @ messages
+          </div>
+
+          {/* Logout */}
+          <button
+            onClick={handleLogout}
+            style={{
+              padding: "12px",
+              backgroundColor: "transparent",
+              border: "1px solid #1a0020",
+              borderRadius: "8px",
+              color: "#3a1a3a",
+              fontSize: "12px",
+              letterSpacing: "2px",
+              cursor: "pointer",
+              transition: "all 0.3s",
+              marginTop: "20px",
+            }}
+            onMouseOver={(e) => {
+              e.currentTarget.style.borderColor = "#440000";
+              e.currentTarget.style.color = "#ff4444";
+              e.currentTarget.style.backgroundColor = "rgba(255,68,68,0.05)";
+            }}
+            onMouseOut={(e) => {
+              e.currentTarget.style.borderColor = "#1a0020";
+              e.currentTarget.style.color = "#3a1a3a";
+              e.currentTarget.style.backgroundColor = "transparent";
+            }}
+          >
+            DISCONNECT
+          </button>
+        </div>
+      )}
+
+      {/* Mobile Header */}
+      {isMobile && (
+        <div
+          style={{
+            padding: "16px 20px",
+            backgroundColor: "#050508",
+            borderBottom: "1px solid #0d0d1a",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
+          <div
+            style={{
+              fontSize: "18px",
               fontWeight: "900",
-              letterSpacing: "6px",
+              letterSpacing: "4px",
               background: "linear-gradient(135deg, #9B30FF, #00BFFF)",
               WebkitBackgroundClip: "text",
               WebkitTextFillColor: "transparent",
@@ -329,280 +649,31 @@ export default function Chat({ user }) {
           </div>
           <div
             style={{
-              color: "#2a2a3a",
-              fontSize: "9px",
-              letterSpacing: "2px",
-              marginTop: "4px",
-            }}
-          >
-            V2.0
-          </div>
-        </div>
-
-        {/* User info */}
-        <div
-          style={{
-            padding: "12px 16px",
-            backgroundColor: "#0a0a15",
-            borderRadius: "8px",
-            border: "1px solid #1a1a3a",
-            marginBottom: "20px",
-          }}
-        >
-          <div
-            style={{
               display: "flex",
               alignItems: "center",
-              gap: "8px",
-              marginBottom: "4px",
+              gap: "6px",
             }}
           >
             <div
               style={{
-                width: "8px",
-                height: "8px",
+                width: "6px",
+                height: "6px",
                 borderRadius: "50%",
                 backgroundColor: "#00ff00",
-                boxShadow: "0 0 6px #00ff00",
               }}
             />
-            <div
+            <span
               style={{
                 color: "#9B30FF",
-                fontSize: "13px",
-                fontWeight: "600",
+                fontSize: "12px",
                 letterSpacing: "1px",
               }}
             >
               {username}
-            </div>
-          </div>
-          <div
-            style={{
-              color: "#2a2a3a",
-              fontSize: "10px",
-              letterSpacing: "1px",
-              paddingLeft: "16px",
-            }}
-          >
-            ONLINE
+            </span>
           </div>
         </div>
-
-        {/* Online Users */}
-        <div
-          style={{
-            color: "#2a2a3a",
-            fontSize: "10px",
-            letterSpacing: "2px",
-            marginBottom: "8px",
-          }}
-        >
-          ONLINE — {onlineUsers.length}
-        </div>
-
-        <div
-          style={{
-            marginBottom: "16px",
-            maxHeight: "80px",
-            overflowY: "auto",
-          }}
-        >
-          {onlineUsers.map((u) => (
-            <div
-              key={u.user_id}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "6px",
-                padding: "4px 8px",
-                fontSize: "11px",
-                color: u.user_id === user.id ? "#9B30FF" : "#4a4a6a",
-              }}
-            >
-              <div
-                style={{
-                  width: "6px",
-                  height: "6px",
-                  borderRadius: "50%",
-                  backgroundColor: "#00ff00",
-                }}
-              />
-              {u.username}
-            </div>
-          ))}
-        </div>
-
-        {/* Channels */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            marginBottom: "8px",
-          }}
-        >
-          <div
-            style={{
-              color: "#2a2a3a",
-              fontSize: "10px",
-              letterSpacing: "2px",
-            }}
-          >
-            CHANNELS
-          </div>
-          <button
-            onClick={() => setShowNewRoom(!showNewRoom)}
-            style={{
-              background: "transparent",
-              border: "none",
-              color: "#9B30FF",
-              fontSize: "18px",
-              cursor: "pointer",
-              padding: "0 4px",
-            }}
-          >
-            +
-          </button>
-        </div>
-
-        {/* New Room Input */}
-        {showNewRoom && (
-          <div
-            style={{
-              display: "flex",
-              gap: "4px",
-              marginBottom: "8px",
-            }}
-          >
-            <input
-              value={newRoomName}
-              onChange={(e) => setNewRoomName(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && createRoom()}
-              placeholder="room name"
-              style={{
-                flex: 1,
-                padding: "6px 10px",
-                backgroundColor: "#0a0a15",
-                border: "1px solid #1a1a3a",
-                borderRadius: "4px",
-                color: "#ffffff",
-                fontSize: "11px",
-                outline: "none",
-              }}
-            />
-            <button
-              onClick={createRoom}
-              style={{
-                padding: "6px 10px",
-                border: "none",
-                borderRadius: "4px",
-                background: "#9B30FF",
-                color: "white",
-                fontSize: "10px",
-                cursor: "pointer",
-              }}
-            >
-              ADD
-            </button>
-          </div>
-        )}
-
-        {/* Room List */}
-        {rooms.map((room) => (
-          <div
-            key={room.id}
-            onClick={() => switchRoom(room)}
-            onContextMenu={(e) => handleRightClick(e, room)}
-            style={{
-              padding: "8px 14px",
-              backgroundColor:
-                activeRoom?.id === room.id && view === "chat"
-                  ? `${room.color || "#9B30FF"}15`
-                  : "transparent",
-              borderRadius: "6px",
-              border: "1px solid",
-              borderColor:
-                activeRoom?.id === room.id && view === "chat"
-                  ? `${room.color || "#9B30FF"}40`
-                  : "transparent",
-              color:
-                activeRoom?.id === room.id && view === "chat"
-                  ? room.color || "#9B30FF"
-                  : "#2a2a3a",
-              fontSize: "13px",
-              letterSpacing: "1px",
-              marginBottom: "2px",
-              cursor: "pointer",
-              transition: "all 0.2s",
-            }}
-          >
-            {room.icon || "#"} {room.name}
-          </div>
-        ))}
-
-        {/* DMs */}
-        <div
-          style={{
-            color: "#2a2a3a",
-            fontSize: "10px",
-            letterSpacing: "2px",
-            marginBottom: "8px",
-            marginTop: "16px",
-          }}
-        >
-          DIRECT MESSAGES
-        </div>
-
-        <div
-          onClick={() => handleViewChange("dms")}
-          style={{
-            padding: "8px 14px",
-            backgroundColor:
-              view === "dms" ? "rgba(0,191,255,0.1)" : "transparent",
-            borderRadius: "6px",
-            border: "1px solid",
-            borderColor: view === "dms" ? "rgba(0,191,255,0.2)" : "transparent",
-            color: view === "dms" ? "#00BFFF" : "#2a2a3a",
-            fontSize: "13px",
-            letterSpacing: "1px",
-            marginBottom: "auto",
-            cursor: "pointer",
-            transition: "all 0.2s",
-          }}
-        >
-          @ messages
-        </div>
-
-        {/* Logout */}
-        <button
-          onClick={handleLogout}
-          style={{
-            padding: "12px",
-            backgroundColor: "transparent",
-            border: "1px solid #1a0020",
-            borderRadius: "8px",
-            color: "#3a1a3a",
-            fontSize: "12px",
-            letterSpacing: "2px",
-            cursor: "pointer",
-            transition: "all 0.3s",
-            marginTop: "20px",
-          }}
-          onMouseOver={(e) => {
-            e.currentTarget.style.borderColor = "#440000";
-            e.currentTarget.style.color = "#ff4444";
-            e.currentTarget.style.backgroundColor = "rgba(255,68,68,0.05)";
-          }}
-          onMouseOut={(e) => {
-            e.currentTarget.style.borderColor = "#1a0020";
-            e.currentTarget.style.color = "#3a1a3a";
-            e.currentTarget.style.backgroundColor = "transparent";
-          }}
-        >
-          DISCONNECT
-        </button>
-      </div>
+      )}
 
       {/* ── MAIN CONTENT ── */}
       {view === "chat" ? (
@@ -611,6 +682,7 @@ export default function Chat({ user }) {
             flex: 1,
             display: "flex",
             flexDirection: "column",
+            paddingBottom: isMobile ? "60px" : "0",
           }}
         >
           {/* Header */}
@@ -765,7 +837,28 @@ export default function Chat({ user }) {
 
                   {/* Message */}
                   <div
+                    key={msg.id}
                     onContextMenu={(e) => handleMessageRightClick(e, msg)}
+                    onTouchStart={(e) => {
+                      const timer = setTimeout(() => {
+                        handleMessageRightClick(
+                          {
+                            preventDefault: () => {},
+                            clientX: e.touches[0].clientX,
+                            clientY: e.touches[0].clientY,
+                          },
+                          msg,
+                        );
+                      }, 500);
+
+                      e.currentTarget.dataset.longpress = timer;
+                    }}
+                    onTouchEnd={(e) => {
+                      clearTimeout(Number(e.currentTarget.dataset.longpress));
+                    }}
+                    onTouchMove={(e) => {
+                      clearTimeout(Number(e.currentTarget.dataset.longpress));
+                    }}
                     style={{
                       display: "flex",
                       flexDirection: "column",
@@ -1000,6 +1093,11 @@ export default function Chat({ user }) {
         </div>
       ) : (
         <DirectMessages currentUser={user} />
+      )}
+
+      {/* Mobile Navigation */}
+      {isMobile && (
+        <MobileNav view={view} onNavigate={handleViewChange} notification={0} />
       )}
 
       {contextMenu && (
