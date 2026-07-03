@@ -117,8 +117,14 @@ export default function Chat({ user }) {
     };
   }, [view, activeRoom]);
 
+  const prevMessageCount = useRef(0);
+
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    // Only scroll if NEW messages arrived
+    if (messages.length > prevMessageCount.current) {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+    prevMessageCount.current = messages.length;
   }, [messages]);
 
   // Poll typing indicators - ADD THIS BLOCK RIGHT HERE
