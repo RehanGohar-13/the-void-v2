@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { supabase } from "../lib/supabaseClient";
 import DirectMessages from "./DirectMessages";
 import ContextMenu from "./ContextMenu";
+import MessageMenu from "./MessageMenu";
 
 export default function Chat({ user }) {
   const [messages, setMessages] = useState([]);
@@ -19,6 +20,9 @@ export default function Chat({ user }) {
   const bottomRef = useRef(null);
   const username = user.user_metadata?.username || user.email;
   const [contextMenu, setContextMenu] = useState(null);
+  const [messageMenu, setMessageMenu] = useState(null);
+  const [replyTo, setReplyTo] = useState(null);
+  const [typingUsers, setTypingUsers] = useState([]);
 
   // Load rooms on mount
   useEffect(() => {
@@ -113,9 +117,49 @@ export default function Chat({ user }) {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // Poll typing indicators - ADD THIS BLOCK RIGHT HERE
+  useEffect(() => {
+    let interval;
+    let mounted = true;
+
+    async function checkTyping() {
+      if (!activeRoom) return;
+      const cutoff = new Date(Date.now() - 3000).toISOString();
+      const { data } = await supabase
+        .from("typing")
+        .select("*")
+        .eq("room_id", activeRoom.id)
+        .gte("typing_at", cutoff)
+        .neq("user_id", user.id);
+
+      if (mounted) setTypingUsers(data || []);
+    }
+
+    if (view === "chat") {
+      checkTyping();
+      interval = setInterval(checkTyping, 2000);
+    }
+
+    return () => {
+      mounted = false;
+      if (interval) clearInterval(interval);
+    };
+  }, [view, activeRoom, user.id]);
+
   function handleViewChange(newView) {
     if (newView === view) return;
     setView(newView);
+  }
+
+  // ADD THIS RIGHT HERE
+  async function handleTyping() {
+    if (!activeRoom) return;
+    await supabase.from("typing").upsert({
+      user_id: user.id,
+      username: username,
+      room_id: activeRoom.id,
+      typing_at: new Date().toISOString(),
+    });
   }
 
   function handleRightClick(e, room) {
@@ -170,14 +214,26 @@ export default function Chat({ user }) {
     if (!content || !activeRoom) return;
     setText("");
 
-    const { error } = await supabase.from("messages").insert({
+    const msgData = {
       content,
       username,
       user_id: user.id,
       room_id: activeRoom.id,
-    });
+    };
+
+    if (replyTo) {
+      msgData.reply_to = replyTo.id;
+      msgData.reply_to_content = replyTo.content.substring(0, 100);
+      msgData.reply_to_username = replyTo.username;
+      setReplyTo(null);
+    }
+
+    const { error } = await supabase.from("messages").insert(msgData);
 
     if (error) setText(content);
+
+    // Clear typing
+    await supabase.from("typing").delete().eq("user_id", user.id);
   }
 
   function formatTime(timestamp) {
@@ -185,6 +241,33 @@ export default function Chat({ user }) {
     const hours = date.getHours().toString().padStart(2, "0");
     const minutes = date.getMinutes().toString().padStart(2, "0");
     return `${hours}:${minutes}`;
+  }
+
+  function handleMessageRightClick(e, msg) {
+    e.preventDefault();
+    setMessageMenu({
+      message: msg,
+      x: e.clientX,
+      y: e.clientY,
+    });
+  }
+
+  async function refreshMessages() {
+    if (!activeRoom) return;
+    const { data } = await supabase
+      .from("messages")
+      .select("*")
+      .eq("room_id", activeRoom.id)
+      .order("created_at", { ascending: true })
+      .limit(100);
+    if (data) setMessages(data);
+  }
+
+  function getDateDivider(msg, prevMsg) {
+    const date = new Date(msg.created_at).toLocaleDateString();
+    if (!prevMsg) return date;
+    const prevDate = new Date(prevMsg.created_at).toLocaleDateString();
+    return date !== prevDate ? date : null;
   }
 
   async function handleLogout() {
@@ -639,68 +722,154 @@ export default function Chat({ user }) {
               const isOwn = msg.user_id === user.id;
               const showName =
                 i === 0 || messages[i - 1]?.user_id !== msg.user_id;
+              const dateDivider = getDateDivider(msg, messages[i - 1]);
 
               return (
-                <div
-                  key={msg.id}
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: isOwn ? "flex-end" : "flex-start",
-                    marginTop: showName ? "16px" : "2px",
-                  }}
-                >
-                  {showName && (
+                <div key={msg.id}>
+                  {/* Date Divider */}
+                  {dateDivider && (
                     <div
                       style={{
-                        color: isOwn ? "#9B30FF" : "#00BFFF",
-                        fontSize: "11px",
-                        letterSpacing: "1px",
-                        marginBottom: "4px",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "12px",
+                        margin: "20px 0 12px",
                       }}
                     >
-                      {isOwn ? "YOU" : msg.username}
+                      <div
+                        style={{
+                          flex: 1,
+                          height: "1px",
+                          background: "#1a1a3a",
+                        }}
+                      />
+                      <div
+                        style={{
+                          color: "#2a2a3a",
+                          fontSize: "11px",
+                          letterSpacing: "2px",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {dateDivider}
+                      </div>
+                      <div
+                        style={{
+                          flex: 1,
+                          height: "1px",
+                          background: "#1a1a3a",
+                        }}
+                      />
                     </div>
                   )}
 
+                  {/* Message */}
                   <div
+                    onContextMenu={(e) => handleMessageRightClick(e, msg)}
                     style={{
                       display: "flex",
-                      alignItems: "flex-end",
-                      gap: "8px",
-                      flexDirection: isOwn ? "row-reverse" : "row",
+                      flexDirection: "column",
+                      alignItems: isOwn ? "flex-end" : "flex-start",
+                      marginTop: showName ? "16px" : "2px",
                     }}
                   >
-                    <div
-                      style={{
-                        maxWidth: "460px",
-                        padding: "10px 16px",
-                        borderRadius: isOwn
-                          ? "16px 4px 16px 16px"
-                          : "4px 16px 16px 16px",
-                        background: isOwn
-                          ? "linear-gradient(135deg, #4B0082, #9B30FF)"
-                          : "#0a0a15",
-                        border: isOwn ? "none" : "1px solid #1a1a3a",
-                        color: "#ffffff",
-                        fontSize: "14px",
-                        lineHeight: "1.5",
-                        boxShadow: isOwn
-                          ? "0 4px 20px rgba(155,48,255,0.2)"
-                          : "none",
-                      }}
-                    >
-                      {msg.content}
-                    </div>
+                    {showName && (
+                      <div
+                        style={{
+                          color: isOwn ? "#9B30FF" : "#00BFFF",
+                          fontSize: "11px",
+                          letterSpacing: "1px",
+                          marginBottom: "4px",
+                        }}
+                      >
+                        {isOwn ? "YOU" : msg.username}
+                      </div>
+                    )}
+
+                    {/* Reply preview */}
+                    {msg.reply_to_content && (
+                      <div
+                        style={{
+                          padding: "6px 12px",
+                          marginBottom: "4px",
+                          borderLeft: "3px solid #4B0082",
+                          backgroundColor: "rgba(75,0,130,0.1)",
+                          borderRadius: "0 6px 6px 0",
+                          maxWidth: "300px",
+                        }}
+                      >
+                        <div
+                          style={{
+                            color: "#9B30FF",
+                            fontSize: "10px",
+                          }}
+                        >
+                          {msg.reply_to_username}
+                        </div>
+                        <div
+                          style={{
+                            color: "#4a4a6a",
+                            fontSize: "11px",
+                            overflow: "hidden",
+                            whiteSpace: "nowrap",
+                            textOverflow: "ellipsis",
+                          }}
+                        >
+                          {msg.reply_to_content}
+                        </div>
+                      </div>
+                    )}
 
                     <div
                       style={{
-                        color: "#2a2a3a",
-                        fontSize: "10px",
-                        whiteSpace: "nowrap",
+                        display: "flex",
+                        alignItems: "flex-end",
+                        gap: "8px",
+                        flexDirection: isOwn ? "row-reverse" : "row",
                       }}
                     >
-                      {formatTime(msg.created_at)}
+                      <div
+                        style={{
+                          maxWidth: "460px",
+                          padding: "10px 16px",
+                          borderRadius: isOwn
+                            ? "16px 4px 16px 16px"
+                            : "4px 16px 16px 16px",
+                          background: isOwn
+                            ? "linear-gradient(135deg, #4B0082, #9B30FF)"
+                            : "#0a0a15",
+                          border: isOwn ? "none" : "1px solid #1a1a3a",
+                          color: "#ffffff",
+                          fontSize: "14px",
+                          lineHeight: "1.5",
+                          boxShadow: isOwn
+                            ? "0 4px 20px rgba(155,48,255,0.2)"
+                            : "none",
+                        }}
+                      >
+                        {msg.content}
+                        {msg.edited && (
+                          <span
+                            style={{
+                              color: "#4a4a6a",
+                              fontSize: "10px",
+                              marginLeft: "8px",
+                            }}
+                          >
+                            (edited)
+                          </span>
+                        )}
+                      </div>
+
+                      <div
+                        style={{
+                          color: "#2a2a3a",
+                          fontSize: "10px",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {formatTime(msg.created_at)}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -709,6 +878,64 @@ export default function Chat({ user }) {
 
             <div ref={bottomRef} />
           </div>
+
+          {typingUsers.length > 0 && (
+            <div
+              style={{
+                padding: "4px 30px",
+                color: "#4a4a6a",
+                fontSize: "12px",
+                fontStyle: "italic",
+                letterSpacing: "0.5px",
+              }}
+            >
+              {typingUsers.map((t) => t.username).join(", ")}
+              {typingUsers.length === 1 ? " is" : " are"} typing...
+            </div>
+          )}
+
+          {replyTo && (
+            <div
+              style={{
+                padding: "10px 30px",
+                backgroundColor: "#050508",
+                borderTop: "1px solid #1a1a3a",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+              }}
+            >
+              <div>
+                <div style={{ color: "#9B30FF", fontSize: "11px" }}>
+                  Replying to {replyTo.username}
+                </div>
+                <div
+                  style={{
+                    color: "#4a4a6a",
+                    fontSize: "12px",
+                    overflow: "hidden",
+                    whiteSpace: "nowrap",
+                    textOverflow: "ellipsis",
+                    maxWidth: "400px",
+                  }}
+                >
+                  {replyTo.content}
+                </div>
+              </div>
+              <button
+                onClick={() => setReplyTo(null)}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  color: "#ff4444",
+                  fontSize: "18px",
+                  cursor: "pointer",
+                }}
+              >
+                ×
+              </button>
+            </div>
+          )}
 
           {/* Input */}
           <div
@@ -728,7 +955,10 @@ export default function Chat({ user }) {
             >
               <input
                 value={text}
-                onChange={(e) => setText(e.target.value)}
+                onChange={(e) => {
+                  setText(e.target.value);
+                  handleTyping();
+                }}
                 placeholder={`Transmit to #${activeRoom?.name || ""}...`}
                 style={{
                   flex: 1,
@@ -786,6 +1016,17 @@ export default function Chat({ user }) {
             }
             setContextMenu(null);
           }}
+        />
+      )}
+
+      {messageMenu && (
+        <MessageMenu
+          message={messageMenu.message}
+          isOwn={messageMenu.message.user_id === user.id}
+          position={{ x: messageMenu.x, y: messageMenu.y }}
+          onClose={() => setMessageMenu(null)}
+          onReply={(msg) => setReplyTo(msg)}
+          onMessagesChanged={refreshMessages}
         />
       )}
     </div>
