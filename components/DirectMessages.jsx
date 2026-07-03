@@ -16,47 +16,90 @@ export default function DirectMessages({ currentUser }) {
   const [text, setText] = useState("");
   const [notification, setNotification] = useState(0);
   const bottomRef = useRef(null);
+
   const username = currentUser.user_metadata?.username || currentUser.email;
 
-  // ── Load friends and requests ──
+  // ── Poll friendships/requests every 5 sec ─────────────────
   useEffect(() => {
+    let mounted = true;
+    let interval;
+
+    async function loadFriendships() {
+      const { data: accepted } = await supabase
+        .from("friendships")
+        .select("*")
+        .or(`from_user.eq.${currentUser.id},to_user.eq.${currentUser.id}`)
+        .eq("status", "accepted");
+
+      const { data: pending } = await supabase
+        .from("friendships")
+        .select("*")
+        .eq("to_user", currentUser.id)
+        .eq("status", "pending");
+
+      if (!mounted) return;
+
+      setFriends(accepted || []);
+      setRequests(pending || []);
+      setNotification((pending || []).length);
+    }
+
     loadFriendships();
-    subscribeToFriendships();
-  }, []);
 
-  async function loadFriendships() {
-    const { data } = await supabase
-      .from("friendships")
-      .select("*")
-      .or(`from_user.eq.${currentUser.id},to_user.eq.${currentUser.id}`)
-      .eq("status", "accepted");
+    interval = setInterval(() => {
+      if (mounted && !activeChat) {
+        loadFriendships();
+      }
+    }, 5000);
 
-    setFriends(data || []);
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+    };
+  }, [currentUser.id, activeChat]);
 
-    const { data: reqs } = await supabase
-      .from("friendships")
-      .select("*")
-      .eq("to_user", currentUser.id)
-      .eq("status", "pending");
+  // ── Poll DM messages every 3 sec when chat open ───────────
+  useEffect(() => {
+    let mounted = true;
+    let interval;
 
-    setRequests(reqs || []);
-    setNotification(reqs?.length || 0);
-  }
+    async function loadDMs() {
+      if (!activeChat) return;
 
-  function subscribeToFriendships() {
-    const channel = supabase
-      .channel("friendships:" + currentUser.id)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "friendships" },
-        () => loadFriendships(),
-      )
-      .subscribe();
+      const friendId =
+        activeChat.from_user === currentUser.id
+          ? activeChat.to_user
+          : activeChat.from_user;
 
-    return () => supabase.removeChannel(channel);
-  }
+      const roomId = getRoomId(currentUser.id, friendId);
 
-  // ── Search user ──
+      const { data } = await supabase
+        .from("direct_messages")
+        .select("*")
+        .eq("room_id", roomId)
+        .order("created_at", { ascending: true })
+        .limit(100);
+
+      if (mounted) {
+        setMessages(data || []);
+      }
+    }
+
+    if (activeChat) {
+      loadDMs();
+
+      interval = setInterval(() => {
+        if (mounted) loadDMs();
+      }, 3000);
+    }
+
+    return () => {
+      mounted = false;
+      if (interval) clearInterval(interval);
+    };
+  }, [activeChat, currentUser.id]);
+
+  // ── Search user ───────────────────────────────────────────
   async function searchUser() {
     setSearchError("");
     setSearchResult(null);
@@ -79,7 +122,6 @@ export default function DirectMessages({ currentUser }) {
       return;
     }
 
-    // Check if already friends or pending
     const { data: existing } = await supabase
       .from("friendships")
       .select("*")
@@ -103,7 +145,7 @@ export default function DirectMessages({ currentUser }) {
     setSearchResult(data);
   }
 
-  // ── Send friend request ──
+  // ── Send friend request ───────────────────────────────────
   async function sendRequest(toUser) {
     const { error } = await supabase.from("friendships").insert({
       from_user: currentUser.id,
@@ -120,73 +162,32 @@ export default function DirectMessages({ currentUser }) {
     }
   }
 
-  // ── Accept request ──
   async function acceptRequest(id) {
     await supabase
       .from("friendships")
       .update({ status: "accepted" })
       .eq("id", id);
-    loadFriendships();
   }
 
-  // ── Decline request ──
   async function declineRequest(id) {
     await supabase
       .from("friendships")
       .update({ status: "declined" })
       .eq("id", id);
-    loadFriendships();
   }
 
-  // ── Block user ──
   async function blockUser(id) {
     await supabase
       .from("friendships")
       .update({ status: "blocked" })
       .eq("id", id);
-    loadFriendships();
   }
 
-  // ── Open DM chat ──
   async function openChat(friend) {
     setActiveChat(friend);
     setMessages([]);
-
-    const roomId = getRoomId(
-      currentUser.id,
-      friend.from_user === currentUser.id ? friend.to_user : friend.from_user,
-    );
-
-    const { data } = await supabase
-      .from("direct_messages")
-      .select("*")
-      .eq("room_id", roomId)
-      .order("created_at", { ascending: true })
-      .limit(100);
-
-    setMessages(data || []);
-
-    // Subscribe to new messages
-    const channel = supabase
-      .channel("dm:" + roomId + ":" + Date.now())
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "direct_messages",
-          filter: `room_id=eq.${roomId}`,
-        },
-        (payload) => {
-          setMessages((prev) => [...prev, payload.new]);
-        },
-      )
-      .subscribe();
-
-    return () => supabase.removeChannel(channel);
   }
 
-  // ── Send DM ──
   async function sendDM(e) {
     e.preventDefault();
     const content = text.trim();
@@ -208,7 +209,6 @@ export default function DirectMessages({ currentUser }) {
     });
   }
 
-  // ── Auto scroll ──
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
@@ -231,7 +231,7 @@ export default function DirectMessages({ currentUser }) {
     });
   }
 
-  // ── If chat is open show DM window ──
+  // ── DM Chat View ──────────────────────────────────────────
   if (activeChat) {
     return (
       <div
@@ -242,7 +242,6 @@ export default function DirectMessages({ currentUser }) {
           backgroundColor: "#000000",
         }}
       >
-        {/* DM Header */}
         <div
           style={{
             padding: "20px 30px",
@@ -253,9 +252,7 @@ export default function DirectMessages({ currentUser }) {
             gap: "12px",
           }}
         >
-          <motion.button
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
+          <button
             onClick={() => setActiveChat(null)}
             style={{
               background: "transparent",
@@ -269,7 +266,7 @@ export default function DirectMessages({ currentUser }) {
             }}
           >
             ← BACK
-          </motion.button>
+          </button>
 
           <div
             style={{
@@ -311,7 +308,6 @@ export default function DirectMessages({ currentUser }) {
           </div>
         </div>
 
-        {/* Messages */}
         <div
           style={{
             flex: 1,
@@ -342,10 +338,8 @@ export default function DirectMessages({ currentUser }) {
               i === 0 || messages[i - 1]?.user_id !== msg.user_id;
 
             return (
-              <motion.div
+              <div
                 key={msg.id}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
                 style={{
                   display: "flex",
                   flexDirection: "column",
@@ -360,8 +354,6 @@ export default function DirectMessages({ currentUser }) {
                       fontSize: "11px",
                       letterSpacing: "1px",
                       marginBottom: "4px",
-                      paddingLeft: isOwn ? 0 : "4px",
-                      paddingRight: isOwn ? "4px" : 0,
                     }}
                   >
                     {isOwn ? "YOU" : msg.username}
@@ -390,9 +382,6 @@ export default function DirectMessages({ currentUser }) {
                       color: "#ffffff",
                       fontSize: "14px",
                       lineHeight: "1.5",
-                      boxShadow: isOwn
-                        ? "0 4px 20px rgba(155,48,255,0.2)"
-                        : "none",
                     }}
                   >
                     {msg.content}
@@ -408,13 +397,13 @@ export default function DirectMessages({ currentUser }) {
                     {formatTime(msg.created_at)}
                   </div>
                 </div>
-              </motion.div>
+              </div>
             );
           })}
+
           <div ref={bottomRef} />
         </div>
 
-        {/* Input */}
         <div
           style={{
             padding: "20px 30px",
@@ -437,12 +426,8 @@ export default function DirectMessages({ currentUser }) {
                 fontSize: "14px",
                 outline: "none",
               }}
-              onFocus={(e) => (e.target.style.borderColor = "#9B30FF")}
-              onBlur={(e) => (e.target.style.borderColor = "#1a1a3a")}
             />
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
+            <button
               type="submit"
               style={{
                 padding: "14px 28px",
@@ -454,18 +439,17 @@ export default function DirectMessages({ currentUser }) {
                 fontWeight: "700",
                 letterSpacing: "2px",
                 cursor: "pointer",
-                boxShadow: "0 0 20px rgba(155,48,255,0.3)",
               }}
             >
               SEND
-            </motion.button>
+            </button>
           </form>
         </div>
       </div>
     );
   }
 
-  // ── Main DM screen ──
+  // ── Main DM Screen ───────────────────────────────────────
   return (
     <div
       style={{
@@ -476,40 +460,26 @@ export default function DirectMessages({ currentUser }) {
         backgroundColor: "#000000",
       }}
     >
-      {/* Header */}
-      <motion.div
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        style={{ marginBottom: "24px" }}
+      <div
+        style={{
+          fontSize: "22px",
+          fontWeight: "700",
+          letterSpacing: "4px",
+          background: "linear-gradient(135deg, #9B30FF, #00BFFF)",
+          WebkitBackgroundClip: "text",
+          WebkitTextFillColor: "transparent",
+          backgroundClip: "text",
+          marginBottom: "6px",
+        }}
       >
-        <div
-          style={{
-            fontSize: "22px",
-            fontWeight: "700",
-            letterSpacing: "4px",
-            background: "linear-gradient(135deg, #9B30FF, #00BFFF)",
-            WebkitBackgroundClip: "text",
-            WebkitTextFillColor: "transparent",
-            backgroundClip: "text",
-            marginBottom: "6px",
-          }}
-        >
-          DIRECT MESSAGES
-        </div>
-        <div
-          style={{
-            height: "1px",
-            background: "linear-gradient(90deg, #9B30FF, #00BFFF, transparent)",
-            marginTop: "10px",
-          }}
-        />
-      </motion.div>
+        DIRECT MESSAGES
+      </div>
 
-      {/* Tabs */}
       <div
         style={{
           display: "flex",
           gap: "4px",
+          marginTop: "16px",
           marginBottom: "24px",
         }}
       >
@@ -535,7 +505,6 @@ export default function DirectMessages({ currentUser }) {
               fontSize: "11px",
               letterSpacing: "2px",
               cursor: "pointer",
-              transition: "all 0.2s",
             }}
           >
             {t.label}
@@ -543,15 +512,13 @@ export default function DirectMessages({ currentUser }) {
         ))}
       </div>
 
-      {/* Tab content */}
       <AnimatePresence mode="wait">
-        {/* FRIENDS TAB */}
         {tab === "friends" && (
           <motion.div
             key="friends"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
             style={{ display: "flex", flexDirection: "column", gap: "8px" }}
           >
             {friends.length === 0 && (
@@ -565,21 +532,12 @@ export default function DirectMessages({ currentUser }) {
                 }}
               >
                 NO FRIENDS YET.
-                <br />
-                <span style={{ fontSize: "11px" }}>
-                  Use SEARCH to find users.
-                </span>
               </div>
             )}
 
-            {friends.map((f, i) => (
-              <motion.button
+            {friends.map((f) => (
+              <button
                 key={f.id}
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: i * 0.05 }}
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
                 onClick={() => openChat(f)}
                 style={{
                   display: "flex",
@@ -591,14 +549,6 @@ export default function DirectMessages({ currentUser }) {
                   borderRadius: "10px",
                   cursor: "pointer",
                   textAlign: "left",
-                }}
-                onMouseOver={(e) => {
-                  e.currentTarget.style.borderColor = "#9B30FF";
-                  e.currentTarget.style.backgroundColor = "#0a0a15";
-                }}
-                onMouseOut={(e) => {
-                  e.currentTarget.style.borderColor = "#1a1a3a";
-                  e.currentTarget.style.backgroundColor = "#050508";
                 }}
               >
                 <div
@@ -613,7 +563,6 @@ export default function DirectMessages({ currentUser }) {
                     color: "white",
                     fontSize: "16px",
                     fontWeight: "700",
-                    flexShrink: 0,
                   }}
                 >
                   {getFriendName(f).charAt(0).toUpperCase()}
@@ -625,7 +574,6 @@ export default function DirectMessages({ currentUser }) {
                       color: "#ffffff",
                       fontSize: "14px",
                       fontWeight: "600",
-                      letterSpacing: "1px",
                     }}
                   >
                     {getFriendName(f)}
@@ -634,27 +582,22 @@ export default function DirectMessages({ currentUser }) {
                     style={{
                       color: "#2a2a3a",
                       fontSize: "11px",
-                      letterSpacing: "1px",
-                      marginTop: "2px",
                     }}
                   >
                     Click to open DM
                   </div>
                 </div>
-
-                <div style={{ color: "#2a2a3a", fontSize: "18px" }}>→</div>
-              </motion.button>
+              </button>
             ))}
           </motion.div>
         )}
 
-        {/* REQUESTS TAB */}
         {tab === "requests" && (
           <motion.div
             key="requests"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
             style={{ display: "flex", flexDirection: "column", gap: "8px" }}
           >
             {requests.length === 0 && (
@@ -671,12 +614,9 @@ export default function DirectMessages({ currentUser }) {
               </div>
             )}
 
-            {requests.map((r, i) => (
-              <motion.div
+            {requests.map((r) => (
+              <div
                 key={r.id}
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: i * 0.05 }}
                 style={{
                   display: "flex",
                   alignItems: "center",
@@ -699,7 +639,6 @@ export default function DirectMessages({ currentUser }) {
                     color: "white",
                     fontSize: "16px",
                     fontWeight: "700",
-                    flexShrink: 0,
                   }}
                 >
                   {r.from_username.charAt(0).toUpperCase()}
@@ -711,91 +650,31 @@ export default function DirectMessages({ currentUser }) {
                       color: "#ffffff",
                       fontSize: "14px",
                       fontWeight: "600",
-                      letterSpacing: "1px",
                     }}
                   >
                     {r.from_username}
                   </div>
-                  <div
-                    style={{
-                      color: "#2a2a3a",
-                      fontSize: "11px",
-                      letterSpacing: "1px",
-                      marginTop: "2px",
-                    }}
-                  >
+                  <div style={{ color: "#2a2a3a", fontSize: "11px" }}>
                     Wants to connect
                   </div>
                 </div>
 
-                {/* Action buttons */}
                 <div style={{ display: "flex", gap: "8px" }}>
-                  <motion.button
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                    onClick={() => acceptRequest(r.id)}
-                    style={{
-                      padding: "8px 16px",
-                      border: "none",
-                      borderRadius: "6px",
-                      background: "linear-gradient(135deg, #004B00, #00ff00)",
-                      color: "white",
-                      fontSize: "11px",
-                      letterSpacing: "1px",
-                      cursor: "pointer",
-                    }}
-                  >
-                    ACCEPT
-                  </motion.button>
-
-                  <motion.button
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                    onClick={() => declineRequest(r.id)}
-                    style={{
-                      padding: "8px 16px",
-                      border: "1px solid #1a1a3a",
-                      borderRadius: "6px",
-                      backgroundColor: "transparent",
-                      color: "#2a2a3a",
-                      fontSize: "11px",
-                      letterSpacing: "1px",
-                      cursor: "pointer",
-                    }}
-                  >
-                    DECLINE
-                  </motion.button>
-
-                  <motion.button
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                    onClick={() => blockUser(r.id)}
-                    style={{
-                      padding: "8px 16px",
-                      border: "none",
-                      borderRadius: "6px",
-                      background: "#440000",
-                      color: "#ff4444",
-                      fontSize: "11px",
-                      letterSpacing: "1px",
-                      cursor: "pointer",
-                    }}
-                  >
-                    BLOCK
-                  </motion.button>
+                  <button onClick={() => acceptRequest(r.id)}>ACCEPT</button>
+                  <button onClick={() => declineRequest(r.id)}>DECLINE</button>
+                  <button onClick={() => blockUser(r.id)}>BLOCK</button>
                 </div>
-              </motion.div>
+              </div>
             ))}
           </motion.div>
         )}
 
-        {/* SEARCH TAB */}
         {tab === "search" && (
           <motion.div
             key="search"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
           >
             <div
               style={{
@@ -808,13 +687,7 @@ export default function DirectMessages({ currentUser }) {
               ENTER EXACT USERNAME
             </div>
 
-            <div
-              style={{
-                display: "flex",
-                gap: "10px",
-                marginBottom: "16px",
-              }}
-            >
+            <div style={{ display: "flex", gap: "10px", marginBottom: "16px" }}>
               <input
                 value={searchQuery}
                 onChange={(e) => {
@@ -834,59 +707,25 @@ export default function DirectMessages({ currentUser }) {
                   fontSize: "14px",
                   outline: "none",
                 }}
-                onFocus={(e) => (e.target.style.borderColor = "#9B30FF")}
-                onBlur={(e) => (e.target.style.borderColor = "#1a1a3a")}
               />
-              <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={searchUser}
-                style={{
-                  padding: "12px 24px",
-                  border: "none",
-                  borderRadius: "8px",
-                  background: "linear-gradient(135deg, #4B0082, #9B30FF)",
-                  color: "white",
-                  fontSize: "12px",
-                  fontWeight: "700",
-                  letterSpacing: "2px",
-                  cursor: "pointer",
-                }}
-              >
-                SEARCH
-              </motion.button>
+              <button onClick={searchUser}>SEARCH</button>
             </div>
 
-            {/* Search error or success message */}
             {searchError && (
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
+              <div
                 style={{
                   color: searchError.includes("sent") ? "#00ff00" : "#ff4444",
                   fontSize: "13px",
-                  letterSpacing: "1px",
                   padding: "10px 16px",
-                  backgroundColor: searchError.includes("sent")
-                    ? "rgba(0,255,0,0.05)"
-                    : "rgba(255,68,68,0.05)",
                   borderRadius: "8px",
-                  border: `1px solid ${
-                    searchError.includes("sent")
-                      ? "rgba(0,255,0,0.2)"
-                      : "rgba(255,68,68,0.2)"
-                  }`,
                 }}
               >
-                {searchError.includes("sent") ? "✓" : "⚠"} {searchError}
-              </motion.div>
+                {searchError}
+              </div>
             )}
 
-            {/* Search result */}
             {searchResult && (
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
+              <div
                 style={{
                   display: "flex",
                   alignItems: "center",
@@ -921,43 +760,19 @@ export default function DirectMessages({ currentUser }) {
                       color: "#ffffff",
                       fontSize: "14px",
                       fontWeight: "600",
-                      letterSpacing: "1px",
                     }}
                   >
                     {searchResult.username}
                   </div>
-                  <div
-                    style={{
-                      color: "#2a2a3a",
-                      fontSize: "11px",
-                      letterSpacing: "1px",
-                      marginTop: "2px",
-                    }}
-                  >
+                  <div style={{ color: "#2a2a3a", fontSize: "11px" }}>
                     User found
                   </div>
                 </div>
 
-                <motion.button
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  onClick={() => sendRequest(searchResult)}
-                  style={{
-                    padding: "10px 20px",
-                    border: "none",
-                    borderRadius: "6px",
-                    background: "linear-gradient(135deg, #4B0082, #9B30FF)",
-                    color: "white",
-                    fontSize: "12px",
-                    fontWeight: "700",
-                    letterSpacing: "2px",
-                    cursor: "pointer",
-                    boxShadow: "0 0 15px rgba(155,48,255,0.3)",
-                  }}
-                >
+                <button onClick={() => sendRequest(searchResult)}>
                   ADD FRIEND
-                </motion.button>
-              </motion.div>
+                </button>
+              </div>
             )}
           </motion.div>
         )}
