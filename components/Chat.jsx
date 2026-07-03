@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import { supabase } from "../lib/supabaseClient";
 import DirectMessages from "./DirectMessages";
+import ContextMenu from "./ContextMenu";
 
 export default function Chat({ user }) {
   const [messages, setMessages] = useState([]);
@@ -17,6 +18,7 @@ export default function Chat({ user }) {
   const [newRoomName, setNewRoomName] = useState("");
   const bottomRef = useRef(null);
   const username = user.user_metadata?.username || user.email;
+  const [contextMenu, setContextMenu] = useState(null);
 
   // Load rooms on mount
   useEffect(() => {
@@ -114,6 +116,23 @@ export default function Chat({ user }) {
   function handleViewChange(newView) {
     if (newView === view) return;
     setView(newView);
+  }
+
+  function handleRightClick(e, room) {
+    e.preventDefault();
+    setContextMenu({
+      room,
+      x: Math.min(e.clientX, window.innerWidth - 260),
+      y: Math.min(e.clientY, window.innerHeight - 300),
+    });
+  }
+
+  async function refreshRooms() {
+    const { data } = await supabase
+      .from("rooms")
+      .select("*")
+      .order("created_at", { ascending: true });
+    if (data) setRooms(data);
   }
 
   function switchRoom(room) {
@@ -411,21 +430,22 @@ export default function Chat({ user }) {
           <div
             key={room.id}
             onClick={() => switchRoom(room)}
+            onContextMenu={(e) => handleRightClick(e, room)}
             style={{
               padding: "8px 14px",
               backgroundColor:
                 activeRoom?.id === room.id && view === "chat"
-                  ? "rgba(155,48,255,0.1)"
+                  ? `${room.color || "#9B30FF"}15`
                   : "transparent",
               borderRadius: "6px",
               border: "1px solid",
               borderColor:
                 activeRoom?.id === room.id && view === "chat"
-                  ? "rgba(155,48,255,0.2)"
+                  ? `${room.color || "#9B30FF"}40`
                   : "transparent",
               color:
                 activeRoom?.id === room.id && view === "chat"
-                  ? "#9B30FF"
+                  ? room.color || "#9B30FF"
                   : "#2a2a3a",
               fontSize: "13px",
               letterSpacing: "1px",
@@ -434,7 +454,7 @@ export default function Chat({ user }) {
               transition: "all 0.2s",
             }}
           >
-            # {room.name}
+            {room.icon || "#"} {room.name}
           </div>
         ))}
 
@@ -750,6 +770,23 @@ export default function Chat({ user }) {
         </div>
       ) : (
         <DirectMessages currentUser={user} />
+      )}
+
+      {contextMenu && (
+        <ContextMenu
+          room={contextMenu.room}
+          isOwner={contextMenu.room.created_by === user.id}
+          position={{ x: contextMenu.x, y: contextMenu.y }}
+          onClose={() => setContextMenu(null)}
+          onRoomUpdated={refreshRooms}
+          onRoomDeleted={(id) => {
+            setRooms((prev) => prev.filter((r) => r.id !== id));
+            if (activeRoom?.id === id) {
+              setActiveRoom(rooms[0]);
+            }
+            setContextMenu(null);
+          }}
+        />
       )}
     </div>
   );
