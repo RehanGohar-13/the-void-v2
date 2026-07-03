@@ -120,11 +120,21 @@ export default function Chat({ user }) {
   const prevMessageCount = useRef(0);
 
   useEffect(() => {
-    // Only scroll if NEW messages arrived
-    if (messages.length > prevMessageCount.current) {
-      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (messages.length !== prevMessageCount.current) {
+      const messagesDiv = bottomRef.current?.parentElement;
+      if (messagesDiv) {
+        const isNearBottom =
+          messagesDiv.scrollHeight -
+            messagesDiv.scrollTop -
+            messagesDiv.clientHeight <
+          100;
+
+        if (isNearBottom || messages.length > prevMessageCount.current) {
+          bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+        }
+      }
+      prevMessageCount.current = messages.length;
     }
-    prevMessageCount.current = messages.length;
   }, [messages]);
 
   // Poll typing indicators - ADD THIS BLOCK RIGHT HERE
