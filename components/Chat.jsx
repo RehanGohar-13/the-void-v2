@@ -9,6 +9,7 @@ import MessageMenu from "./MessageMenu";
 import MobileNav from "./MobileNav";
 import OnlinePanel from "./OnlinePanel";
 import MobileSettings from "./MobileSettings";
+import SettingsPage from "./SettingsPage";
 
 export default function Chat({ user }) {
   const [messages, setMessages] = useState([]);
@@ -652,6 +653,28 @@ export default function Chat({ user }) {
             @ messages
           </div>
 
+          {/* Settings */}
+          <button
+            onClick={() => handleViewChange("settings")}
+            style={{
+              width: "100%",
+              padding: "10px",
+              backgroundColor:
+                view === "settings" ? "rgba(155,48,255,0.1)" : "transparent",
+              border: "1px solid",
+              borderColor:
+                view === "settings" ? "rgba(155,48,255,0.2)" : "#1a1a3a",
+              borderRadius: "8px",
+              color: view === "settings" ? "#9B30FF" : "#2a2a3a",
+              fontSize: "12px",
+              letterSpacing: "2px",
+              cursor: "pointer",
+              marginTop: "8px",
+            }}
+          >
+            ⚙ SETTINGS
+          </button>
+
           {/* Logout */}
           <button
             onClick={handleLogout}
@@ -851,13 +874,12 @@ export default function Chat({ user }) {
                     borderRadius: "4px",
                     background: "#9B30FF",
                     color: "white",
-                    fontSize: "10px",
+                    fontSize: "16px",
                     cursor: "pointer",
                     flexShrink: 0,
-                    minWidth: "40px",
                   }}
                 >
-                  ADD
+                  +
                 </button>
               </div>
               <div style={{ display: "flex", gap: "6px" }}>
@@ -1317,7 +1339,11 @@ export default function Chat({ user }) {
       ) : view === "online" ? (
         <OnlinePanel onlineUsers={onlineUsers} currentUserId={user.id} />
       ) : view === "settings" ? (
-        <MobileSettings user={user} />
+        isMobile ? (
+          <MobileSettings user={user} />
+        ) : (
+          <SettingsPage user={user} onClose={() => handleViewChange("chat")} />
+        )
       ) : null}
 
       {/* Mobile Nav */}
