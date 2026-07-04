@@ -42,5 +42,7 @@ export default function Home() {
       </div>
     );
 
-  return user ? <Chat user={user} /> : <Auth />;
+  return (
+    <div suppressHydrationWarning>{user ? <Chat user={user} /> : <Auth />}</div>
+  );
 }

@@ -209,11 +209,6 @@ export default function ContextMenu({
                     label="Channel Info"
                     onClick={() => setView("info")}
                   />
-                  <MenuItem
-                    icon="📋"
-                    label="Channel Info"
-                    onClick={() => setView("info")}
-                  />
                   {room.is_private && (
                     <MenuItem
                       icon="👥"
