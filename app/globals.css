@@ -1,3 +1,11 @@
+@font-face {
+  font-family: "Mephisto";
+  src: url("/fonts/Mephisto.ttf") format("truetype");
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
 /* ── RESET ── */
 * {
   margin: 0;

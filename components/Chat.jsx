@@ -184,7 +184,7 @@ export default function Chat({ user }) {
   }
 
   async function createRoom() {
-    const name = newRoomName.trim().toLowerCase();
+    const name = newRoomName.trim();
     if (!name) return;
     const { data, error } = await supabase
       .from("rooms")
@@ -342,6 +342,7 @@ export default function Chat({ user }) {
           <div style={{ marginBottom: "30px" }}>
             <div
               style={{
+                fontFamily: "'Mephisto', sans-serif",
                 fontSize: "22px",
                 fontWeight: "900",
                 letterSpacing: "6px",
@@ -695,6 +696,7 @@ export default function Chat({ user }) {
           >
             <div
               style={{
+                fontFamily: "'Mephisto', sans-serif",
                 fontSize: "18px",
                 fontWeight: "900",
                 letterSpacing: "4px",

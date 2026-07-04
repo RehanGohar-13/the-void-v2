@@ -155,6 +155,7 @@ export default function Auth() {
 
           <div
             style={{
+              fontFamily: "'Mephisto', sans-serif",
               fontSize: "56px",
               fontWeight: "900",
               letterSpacing: "12px",
