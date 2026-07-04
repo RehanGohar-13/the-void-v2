@@ -359,14 +359,15 @@ export default function Chat({ user }) {
   async function handleFileUpload() {
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = "image/*,.pdf,.txt,.doc,.docx,.zip";
+    input.accept =
+      "image/*,video/*,audio/*,.pdf,.txt,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.zip,.rar,.7z,.py,.js,.html,.css,.json,.xml,.md,.rtf";
 
     input.onchange = async (e) => {
       const file = e.target.files[0];
       if (!file || !activeRoom) return;
 
-      if (file.size > 5 * 1024 * 1024) {
-        alert("File too large. Maximum 5MB.");
+      if (file.size > 50 * 1024 * 1024) {
+        alert("File too large. Maximum 50MB.");
         return;
       }
 
