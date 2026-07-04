@@ -25,6 +25,7 @@ export default function Home() {
   if (loading)
     return (
       <div
+        suppressHydrationWarning
         style={{
           minHeight: "100vh",
           backgroundColor: "#000000",

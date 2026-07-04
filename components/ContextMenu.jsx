@@ -459,18 +459,9 @@ export default function ContextMenu({
               )}
 
               {/* Member list */}
-              {members.length === 0 ? (
-                <div
-                  style={{
-                    color: "#2a2a3a",
-                    fontSize: "12px",
-                    textAlign: "center",
-                  }}
-                >
-                  No members yet
-                </div>
-              ) : (
-                members.map((m) => (
+              {members.map((m) => {
+                const isCreator = m.user_id === room.created_by;
+                return (
                   <div
                     key={m.id}
                     style={{
@@ -481,24 +472,31 @@ export default function ContextMenu({
                       borderBottom: "1px solid #0d0d1a",
                     }}
                   >
-                    <span style={{ color: "#8a8aaa", fontSize: "12px" }}>
-                      {m.username || "Owner"}
-                    </span>
-                    <button
-                      onClick={() => removeMember(m.id)}
+                    <span
                       style={{
-                        background: "transparent",
-                        border: "none",
-                        color: "#ff4444",
-                        fontSize: "14px",
-                        cursor: "pointer",
+                        color: isCreator ? "#9B30FF" : "#8a8aaa",
+                        fontSize: "12px",
                       }}
                     >
-                      ×
-                    </button>
+                      {m.username || "Owner"} {isCreator ? "(owner)" : ""}
+                    </span>
+                    {!isCreator && (
+                      <button
+                        onClick={() => removeMember(m.id)}
+                        style={{
+                          background: "transparent",
+                          border: "none",
+                          color: "#ff4444",
+                          fontSize: "14px",
+                          cursor: "pointer",
+                        }}
+                      >
+                        ×
+                      </button>
+                    )}
                   </div>
-                ))
-              )}
+                );
+              })}
 
               <button
                 onClick={onClose}

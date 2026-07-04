@@ -846,13 +846,15 @@ export default function Chat({ user }) {
                 <button
                   onClick={createRoom}
                   style={{
-                    padding: "8px 16px",
+                    padding: "6px 10px",
                     border: "none",
-                    borderRadius: "20px",
+                    borderRadius: "4px",
                     background: "#9B30FF",
                     color: "white",
-                    fontSize: "12px",
+                    fontSize: "10px",
                     cursor: "pointer",
+                    flexShrink: 0,
+                    minWidth: "40px",
                   }}
                 >
                   ADD
