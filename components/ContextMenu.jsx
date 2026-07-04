@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "../lib/supabaseClient";
+import { useState, useEffect } from "react";
 
 export default function ContextMenu({
   room,
@@ -32,6 +33,11 @@ export default function ContextMenu({
     "#7B68EE",
     "#20B2AA",
   ];
+
+  const [members, setMembers] = useState([]);
+  const [allUsers, setAllUsers] = useState([]);
+  const [addUsername, setAddUsername] = useState("");
+  const [memberError, setMemberError] = useState("");
 
   async function saveChanges() {
     if (!name.trim()) {
@@ -65,6 +71,48 @@ export default function ContextMenu({
 
     onRoomDeleted(room.id);
     onClose();
+  }
+
+  async function loadMembers() {
+    const { data } = await supabase
+      .from("channel_members")
+      .select("*")
+      .eq("room_id", room.id);
+    setMembers(data || []);
+  }
+
+  async function addMember() {
+    if (!addUsername.trim()) return;
+    setMemberError("");
+
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("username", addUsername.trim())
+      .single();
+
+    if (!profile) {
+      setMemberError("User not found");
+      return;
+    }
+
+    const { error } = await supabase.from("channel_members").insert({
+      room_id: room.id,
+      user_id: profile.id,
+      username: profile.username,
+    });
+
+    if (error) {
+      setMemberError("Already a member");
+    } else {
+      setAddUsername("");
+      loadMembers();
+    }
+  }
+
+  async function removeMember(memberId) {
+    await supabase.from("channel_members").delete().eq("id", memberId);
+    loadMembers();
   }
 
   // Close when clicking outside
@@ -332,6 +380,115 @@ export default function ContextMenu({
               <button
                 onClick={onClose}
                 style={{ ...btnCancel, marginTop: "12px", width: "100%" }}
+              >
+                CLOSE
+              </button>
+            </div>
+          )}
+
+          {/* ── MEMBERS VIEW ── */}
+          {view === "members" && (
+            <div style={{ padding: "8px" }}>
+              <div
+                style={{
+                  color: "#9B30FF",
+                  fontSize: "13px",
+                  fontWeight: "600",
+                  letterSpacing: "2px",
+                  marginBottom: "12px",
+                }}
+              >
+                MANAGE MEMBERS
+              </div>
+
+              {/* Add member */}
+              <div
+                style={{ display: "flex", gap: "4px", marginBottom: "12px" }}
+              >
+                <input
+                  value={addUsername}
+                  onChange={(e) => setAddUsername(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && addMember()}
+                  placeholder="Exact username"
+                  style={inputStyle}
+                />
+                <button
+                  onClick={addMember}
+                  style={{
+                    padding: "8px 12px",
+                    border: "none",
+                    borderRadius: "6px",
+                    background: "#9B30FF",
+                    color: "white",
+                    fontSize: "10px",
+                    cursor: "pointer",
+                  }}
+                >
+                  ADD
+                </button>
+              </div>
+
+              {memberError && (
+                <div
+                  style={{
+                    color: "#ff4444",
+                    fontSize: "11px",
+                    marginBottom: "8px",
+                  }}
+                >
+                  {memberError}
+                </div>
+              )}
+
+              {/* Member list */}
+              {members.length === 0 ? (
+                <div
+                  style={{
+                    color: "#2a2a3a",
+                    fontSize: "12px",
+                    textAlign: "center",
+                  }}
+                >
+                  No members yet
+                </div>
+              ) : (
+                members.map((m) => (
+                  <div
+                    key={m.id}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      padding: "6px 0",
+                      borderBottom: "1px solid #0d0d1a",
+                    }}
+                  >
+                    <span style={{ color: "#8a8aaa", fontSize: "12px" }}>
+                      {m.username || "Owner"}
+                    </span>
+                    <button
+                      onClick={() => removeMember(m.id)}
+                      style={{
+                        background: "transparent",
+                        border: "none",
+                        color: "#ff4444",
+                        fontSize: "14px",
+                        cursor: "pointer",
+                      }}
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))
+              )}
+
+              <button
+                onClick={onClose}
+                style={{
+                  ...btnCancel,
+                  marginTop: "12px",
+                  width: "100%",
+                }}
               >
                 CLOSE
               </button>

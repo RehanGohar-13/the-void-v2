@@ -25,12 +25,11 @@ export default function Chat({ user }) {
   const [replyTo, setReplyTo] = useState(null);
   const [typingUsers, setTypingUsers] = useState([]);
   const [isMobile, setIsMobile] = useState(false);
-
   const bottomRef = useRef(null);
   const prevMessageCount = useRef(0);
   const messagesContainerRef = useRef(null);
-
   const username = user.user_metadata?.username || user.email;
+  const [newRoomPrivate, setNewRoomPrivate] = useState(false);
 
   // Detect mobile
   useEffect(() => {
@@ -189,13 +188,18 @@ export default function Chat({ user }) {
     if (!name) return;
     const { data, error } = await supabase
       .from("rooms")
-      .insert({ name, created_by: user.id })
+      .insert({
+        name,
+        created_by: user.id,
+        is_private: newRoomPrivate,
+      })
       .select()
       .single();
     if (!error && data) {
       setRooms((prev) => [...prev, data]);
       setActiveRoom(data);
       setNewRoomName("");
+      setNewRoomPrivate(false);
       setShowNewRoom(false);
       setView("chat");
     }
@@ -488,37 +492,79 @@ export default function Chat({ user }) {
           </div>
 
           {showNewRoom && (
-            <div style={{ display: "flex", gap: "4px", marginBottom: "8px" }}>
-              <input
-                value={newRoomName}
-                onChange={(e) => setNewRoomName(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && createRoom()}
-                placeholder="room name"
-                style={{
-                  flex: 1,
-                  padding: "6px 10px",
-                  backgroundColor: "#0a0a15",
-                  border: "1px solid #1a1a3a",
-                  borderRadius: "4px",
-                  color: "#ffffff",
-                  fontSize: "11px",
-                  outline: "none",
-                }}
-              />
-              <button
-                onClick={createRoom}
-                style={{
-                  padding: "6px 10px",
-                  border: "none",
-                  borderRadius: "4px",
-                  background: "#9B30FF",
-                  color: "white",
-                  fontSize: "10px",
-                  cursor: "pointer",
-                }}
-              >
-                ADD
-              </button>
+            <div style={{ marginBottom: "8px" }}>
+              <div style={{ display: "flex", gap: "4px", marginBottom: "6px" }}>
+                <input
+                  value={newRoomName}
+                  onChange={(e) => setNewRoomName(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && createRoom()}
+                  placeholder="room name"
+                  style={{
+                    flex: 1,
+                    padding: "6px 10px",
+                    backgroundColor: "#0a0a15",
+                    border: "1px solid #1a1a3a",
+                    borderRadius: "4px",
+                    color: "#ffffff",
+                    fontSize: "11px",
+                    outline: "none",
+                  }}
+                />
+                <button
+                  onClick={createRoom}
+                  style={{
+                    padding: "6px 10px",
+                    border: "none",
+                    borderRadius: "4px",
+                    background: "#9B30FF",
+                    color: "white",
+                    fontSize: "10px",
+                    cursor: "pointer",
+                  }}
+                >
+                  ADD
+                </button>
+              </div>
+              <div style={{ display: "flex", gap: "4px" }}>
+                <button
+                  onClick={() => setNewRoomPrivate(false)}
+                  style={{
+                    flex: 1,
+                    padding: "4px",
+                    borderRadius: "4px",
+                    fontSize: "10px",
+                    cursor: "pointer",
+                    letterSpacing: "1px",
+                    border: "1px solid",
+                    borderColor: !newRoomPrivate ? "#00ff00" : "#1a1a3a",
+                    backgroundColor: !newRoomPrivate
+                      ? "rgba(0,255,0,0.1)"
+                      : "transparent",
+                    color: !newRoomPrivate ? "#00ff00" : "#2a2a3a",
+                  }}
+                >
+                  🌐 PUBLIC
+                </button>
+                <button
+                  onClick={() => setNewRoomPrivate(true)}
+                  style={{
+                    flex: 1,
+                    padding: "4px",
+                    borderRadius: "4px",
+                    fontSize: "10px",
+                    cursor: "pointer",
+                    letterSpacing: "1px",
+                    border: "1px solid",
+                    borderColor: newRoomPrivate ? "#ff8c00" : "#1a1a3a",
+                    backgroundColor: newRoomPrivate
+                      ? "rgba(255,140,0,0.1)"
+                      : "transparent",
+                    color: newRoomPrivate ? "#ff8c00" : "#2a2a3a",
+                  }}
+                >
+                  🔒 PRIVATE
+                </button>
+              </div>
             </div>
           )}
 
@@ -569,7 +615,7 @@ export default function Chat({ user }) {
                 transition: "all 0.2s",
               }}
             >
-              {room.icon || "#"} {room.name}
+              {room.is_private ? "🔒" : "#"} {room.name}
             </div>
           ))}
 
@@ -770,40 +816,84 @@ export default function Chat({ user }) {
                 padding: "8px 12px",
                 backgroundColor: "#020205",
                 borderBottom: "1px solid #0d0d1a",
-                display: "flex",
-                gap: "8px",
               }}
             >
-              <input
-                value={newRoomName}
-                onChange={(e) => setNewRoomName(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && createRoom()}
-                placeholder="Channel name..."
+              <div
                 style={{
-                  flex: 1,
-                  padding: "8px 14px",
-                  backgroundColor: "#0a0a15",
-                  border: "1px solid #1a1a3a",
-                  borderRadius: "20px",
-                  color: "#ffffff",
-                  fontSize: "13px",
-                  outline: "none",
-                }}
-              />
-              <button
-                onClick={createRoom}
-                style={{
-                  padding: "8px 16px",
-                  border: "none",
-                  borderRadius: "20px",
-                  background: "#9B30FF",
-                  color: "white",
-                  fontSize: "12px",
-                  cursor: "pointer",
+                  display: "flex",
+                  gap: "8px",
+                  marginBottom: "6px",
                 }}
               >
-                ADD
-              </button>
+                <input
+                  value={newRoomName}
+                  onChange={(e) => setNewRoomName(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && createRoom()}
+                  placeholder="Channel name..."
+                  style={{
+                    flex: 1,
+                    padding: "8px 14px",
+                    backgroundColor: "#0a0a15",
+                    border: "1px solid #1a1a3a",
+                    borderRadius: "20px",
+                    color: "#ffffff",
+                    fontSize: "13px",
+                    outline: "none",
+                  }}
+                />
+                <button
+                  onClick={createRoom}
+                  style={{
+                    padding: "8px 16px",
+                    border: "none",
+                    borderRadius: "20px",
+                    background: "#9B30FF",
+                    color: "white",
+                    fontSize: "12px",
+                    cursor: "pointer",
+                  }}
+                >
+                  ADD
+                </button>
+              </div>
+              <div style={{ display: "flex", gap: "6px" }}>
+                <button
+                  onClick={() => setNewRoomPrivate(false)}
+                  style={{
+                    flex: 1,
+                    padding: "6px",
+                    borderRadius: "20px",
+                    fontSize: "11px",
+                    cursor: "pointer",
+                    border: "1px solid",
+                    borderColor: !newRoomPrivate ? "#00ff00" : "#1a1a3a",
+                    backgroundColor: !newRoomPrivate
+                      ? "rgba(0,255,0,0.1)"
+                      : "transparent",
+                    color: !newRoomPrivate ? "#00ff00" : "#2a2a3a",
+                  }}
+                >
+                  🌐 PUBLIC
+                </button>
+                <button
+                  onClick={() => setNewRoomPrivate(true)}
+                  style={{
+                    flex: 1,
+                    padding: "6px",
+                    borderRadius: "20px",
+                    fontSize: "11px",
+                    cursor: "pointer",
+                    border: "1px solid",
+                    borderColor: newRoomPrivate ? "#ff8c00" : "#1a1a3a",
+                    backgroundColor: newRoomPrivate
+                      ? "rgba(255,140,0,0.1)"
+                      : "transparent",
+                    color: newRoomPrivate ? "#ff8c00" : "#2a2a3a",
+                  }}
+                >
+                  🔒 PRIVATE
+                </button>
+              </div>
             </div>
           )}
         </div>
