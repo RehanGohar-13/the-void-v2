@@ -881,21 +881,6 @@ export default function Chat({ user }) {
                     outline: "none",
                   }}
                 />
-                <button
-                  onClick={createRoom}
-                  style={{
-                    padding: "6px 10px",
-                    border: "none",
-                    borderRadius: "4px",
-                    background: "#9B30FF",
-                    color: "white",
-                    fontSize: "16px",
-                    cursor: "pointer",
-                    flexShrink: 0,
-                  }}
-                >
-                  +
-                </button>
               </div>
               <div style={{ display: "flex", gap: "6px" }}>
                 <button
