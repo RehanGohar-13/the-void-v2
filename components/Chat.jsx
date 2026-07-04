@@ -9,30 +9,38 @@ import MessageMenu from "./MessageMenu";
 import MobileNav from "./MobileNav";
 import OnlinePanel from "./OnlinePanel";
 import MobileSettings from "./MobileSettings";
-import SettingsPage from "./SettingsPage";
+import EmojiPicker from "./EmojiPicker";
 
 export default function Chat({ user }) {
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState("chat");
+
   const [rooms, setRooms] = useState([]);
   const [activeRoom, setActiveRoom] = useState(null);
-  const [onlineUsers, setOnlineUsers] = useState([]);
   const [showNewRoom, setShowNewRoom] = useState(false);
   const [newRoomName, setNewRoomName] = useState("");
+  const [newRoomPrivate, setNewRoomPrivate] = useState(false);
+
+  const [onlineUsers, setOnlineUsers] = useState([]);
+  const [typingUsers, setTypingUsers] = useState([]);
+
   const [contextMenu, setContextMenu] = useState(null);
   const [messageMenu, setMessageMenu] = useState(null);
   const [replyTo, setReplyTo] = useState(null);
-  const [typingUsers, setTypingUsers] = useState([]);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(null);
+  const [reactions, setReactions] = useState({});
+
   const [isMobile, setIsMobile] = useState(false);
+
   const bottomRef = useRef(null);
   const prevMessageCount = useRef(0);
   const messagesContainerRef = useRef(null);
-  const username = user.user_metadata?.username || user.email;
-  const [newRoomPrivate, setNewRoomPrivate] = useState(false);
 
-  // Detect mobile
+  const username = user.user_metadata?.username || user.email;
+
+  // ── Mobile detect ─────────────────────────────────────────
   useEffect(() => {
     function checkMobile() {
       setIsMobile(window.innerWidth < 768);
@@ -42,22 +50,40 @@ export default function Chat({ user }) {
     return () => window.removeEventListener("resize", checkMobile);
   }, []);
 
-  // Load rooms
+  // ── Load rooms ────────────────────────────────────────────
   useEffect(() => {
-    async function loadRooms() {
-      const { data } = await supabase
-        .from("rooms")
-        .select("*")
-        .order("created_at", { ascending: true });
-      if (data && data.length > 0) {
-        setRooms(data);
-        setActiveRoom(data[0]);
-      }
-    }
     loadRooms();
-  }, []);
+  }, [user.id]);
 
-  // Update presence
+  async function loadRooms() {
+    const { data } = await supabase
+      .from("rooms")
+      .select("*")
+      .or(
+        `created_by.eq.${user.id},created_by.is.null,is_private.eq.false,id.in.(select room_id from channel_members where user_id = '${user.id}')`,
+      )
+      .order("created_at", { ascending: true });
+
+    if (data && data.length > 0) {
+      setRooms(data);
+      setActiveRoom((prev) => {
+        if (prev) {
+          const stillExists = data.find((r) => r.id === prev.id);
+          if (stillExists) return stillExists;
+        }
+        return data[0];
+      });
+    } else {
+      setRooms([]);
+      setActiveRoom(null);
+    }
+  }
+
+  async function refreshRooms() {
+    await loadRooms();
+  }
+
+  // ── Presence ──────────────────────────────────────────────
   useEffect(() => {
     async function updatePresence() {
       await supabase.from("presence").upsert({
@@ -67,92 +93,100 @@ export default function Chat({ user }) {
         last_seen: new Date().toISOString(),
       });
     }
+
     updatePresence();
     const interval = setInterval(updatePresence, 30000);
     return () => clearInterval(interval);
   }, [user.id, username]);
 
-  // Poll online users
+  // ── Poll online users ─────────────────────────────────────
   useEffect(() => {
     let mounted = true;
+
     async function loadOnline() {
       const cutoff = new Date(Date.now() - 60000).toISOString();
       const { data } = await supabase
         .from("presence")
         .select("*")
         .gte("last_seen", cutoff);
+
       if (mounted) setOnlineUsers(data || []);
     }
+
     loadOnline();
     const interval = setInterval(loadOnline, 10000);
+
     return () => {
       mounted = false;
       clearInterval(interval);
     };
   }, []);
 
-  // Poll messages
+  // ── Poll messages for active room ─────────────────────────
   useEffect(() => {
     let interval;
     let mounted = true;
+
     async function loadMessages() {
-      if (!activeRoom) return;
+      if (!activeRoom || view !== "chat") return;
+
       const { data } = await supabase
         .from("messages")
         .select("*")
         .eq("room_id", activeRoom.id)
         .order("created_at", { ascending: true })
         .limit(100);
+
       if (mounted && data) {
         setMessages(data);
         setLoading(false);
       }
     }
-    if (view === "chat" && activeRoom) {
+
+    if (activeRoom && view === "chat") {
       loadMessages();
       interval = setInterval(loadMessages, 5000);
     }
+
     return () => {
       mounted = false;
       if (interval) clearInterval(interval);
     };
-  }, [view, activeRoom]);
+  }, [activeRoom, view]);
 
-  // Smart scroll
+  // ── Poll reactions ────────────────────────────────────────
   useEffect(() => {
-    const container = messagesContainerRef.current;
-    if (!container) return;
+    loadReactions();
+  }, [messages]);
 
-    // First load: always scroll to bottom
-    if (prevMessageCount.current === 0 && messages.length > 0) {
-      setTimeout(() => {
-        bottomRef.current?.scrollIntoView({ behavior: "instant" });
-      }, 100);
-      prevMessageCount.current = messages.length;
+  async function loadReactions() {
+    if (!messages.length) {
+      setReactions({});
       return;
     }
 
-    // New messages arrived
-    if (messages.length > prevMessageCount.current) {
-      const isNearBottom =
-        container.scrollHeight - container.scrollTop - container.clientHeight <
-        150;
-      if (isNearBottom) {
-        setTimeout(() => {
-          bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-        }, 100);
-      }
-    }
+    const ids = messages.map((m) => m.id);
+    const { data } = await supabase
+      .from("reactions")
+      .select("*")
+      .in("message_id", ids);
 
-    prevMessageCount.current = messages.length;
-  }, [messages]);
+    const grouped = {};
+    (data || []).forEach((r) => {
+      if (!grouped[r.message_id]) grouped[r.message_id] = [];
+      grouped[r.message_id].push(r);
+    });
+    setReactions(grouped);
+  }
 
-  // Poll typing
+  // ── Poll typing indicators ────────────────────────────────
   useEffect(() => {
     let interval;
     let mounted = true;
+
     async function checkTyping() {
-      if (!activeRoom) return;
+      if (!activeRoom || view !== "chat") return;
+
       const cutoff = new Date(Date.now() - 3000).toISOString();
       const { data } = await supabase
         .from("typing")
@@ -160,18 +194,50 @@ export default function Chat({ user }) {
         .eq("room_id", activeRoom.id)
         .gte("typing_at", cutoff)
         .neq("user_id", user.id);
+
       if (mounted) setTypingUsers(data || []);
     }
+
     if (view === "chat") {
       checkTyping();
       interval = setInterval(checkTyping, 2000);
     }
+
     return () => {
       mounted = false;
       if (interval) clearInterval(interval);
     };
   }, [view, activeRoom, user.id]);
 
+  // ── Smart scroll ───────────────────────────────────────────
+  useEffect(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+
+    if (prevMessageCount.current === 0 && messages.length > 0) {
+      setTimeout(() => {
+        bottomRef.current?.scrollIntoView({ behavior: "instant" });
+      }, 80);
+      prevMessageCount.current = messages.length;
+      return;
+    }
+
+    if (messages.length > prevMessageCount.current) {
+      const isNearBottom =
+        container.scrollHeight - container.scrollTop - container.clientHeight <
+        150;
+
+      if (isNearBottom) {
+        setTimeout(() => {
+          bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+        }, 80);
+      }
+    }
+
+    prevMessageCount.current = messages.length;
+  }, [messages]);
+
+  // ── Helpers ────────────────────────────────────────────────
   function handleViewChange(newView) {
     if (newView === view) return;
     setView(newView);
@@ -187,6 +253,7 @@ export default function Chat({ user }) {
   async function createRoom() {
     const name = newRoomName.trim();
     if (!name) return;
+
     const { data, error } = await supabase
       .from("rooms")
       .insert({
@@ -196,6 +263,7 @@ export default function Chat({ user }) {
       })
       .select()
       .single();
+
     if (!error && data) {
       setRooms((prev) => [...prev, data]);
       setActiveRoom(data);
@@ -210,21 +278,26 @@ export default function Chat({ user }) {
     e.preventDefault();
     const content = text.trim();
     if (!content || !activeRoom) return;
+
     setText("");
+
     const msgData = {
       content,
       username,
       user_id: user.id,
       room_id: activeRoom.id,
     };
+
     if (replyTo) {
       msgData.reply_to = replyTo.id;
       msgData.reply_to_content = replyTo.content.substring(0, 100);
       msgData.reply_to_username = replyTo.username;
       setReplyTo(null);
     }
+
     const { error } = await supabase.from("messages").insert(msgData);
     if (error) setText(content);
+
     await supabase.from("typing").delete().eq("user_id", user.id);
   }
 
@@ -238,26 +311,76 @@ export default function Chat({ user }) {
     });
   }
 
+  async function addReaction(messageId, emoji) {
+    const existing = (reactions[messageId] || []).find(
+      (r) => r.user_id === user.id && r.emoji === emoji,
+    );
+
+    if (existing) {
+      await supabase.from("reactions").delete().eq("id", existing.id);
+    } else {
+      await supabase.from("reactions").insert({
+        message_id: messageId,
+        user_id: user.id,
+        username,
+        emoji,
+      });
+    }
+
+    await loadReactions();
+  }
+
+  async function handleFileUpload() {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*,.pdf,.txt,.doc,.docx,.zip";
+
+    input.onchange = async (e) => {
+      const file = e.target.files[0];
+      if (!file || !activeRoom) return;
+
+      if (file.size > 5 * 1024 * 1024) {
+        alert("File too large. Maximum 5MB.");
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = async (event) => {
+        const base64 = event.target.result;
+
+        await supabase.from("messages").insert({
+          content: `📎 ${file.name}`,
+          username,
+          user_id: user.id,
+          room_id: activeRoom.id,
+          file_url: base64,
+          file_name: file.name,
+          file_type: file.type,
+        });
+      };
+
+      reader.readAsDataURL(file);
+    };
+
+    input.click();
+  }
+
   function handleRightClick(e, room) {
     e.preventDefault();
     setContextMenu({
       room,
       x: Math.min(e.clientX, window.innerWidth - 260),
-      y: Math.min(e.clientY, window.innerHeight - 300),
+      y: Math.min(e.clientY, window.innerHeight - 320),
     });
   }
 
   function handleMessageRightClick(e, msg) {
     e.preventDefault();
-    setMessageMenu({ message: msg, x: e.clientX, y: e.clientY });
-  }
-
-  async function refreshRooms() {
-    const { data } = await supabase
-      .from("rooms")
-      .select("*")
-      .order("created_at", { ascending: true });
-    if (data) setRooms(data);
+    setMessageMenu({
+      message: msg,
+      x: Math.min(e.clientX, window.innerWidth - 240),
+      y: Math.min(e.clientY, window.innerHeight - 320),
+    });
   }
 
   async function refreshMessages() {
@@ -274,8 +397,12 @@ export default function Chat({ user }) {
   async function handleLogout() {
     await supabase
       .from("presence")
-      .update({ status: "offline", last_seen: new Date().toISOString() })
+      .update({
+        status: "offline",
+        last_seen: new Date().toISOString(),
+      })
       .eq("user_id", user.id);
+
     await supabase.auth.signOut();
   }
 
@@ -293,9 +420,24 @@ export default function Chat({ user }) {
     return date !== prevDate ? date : null;
   }
 
-  // ════════════════════════════════════════════════════════
-  // RENDER
-  // ════════════════════════════════════════════════════════
+  function groupReactionData(msgId) {
+    const raw = reactions[msgId] || [];
+    return Object.entries(
+      raw.reduce((acc, r) => {
+        acc[r.emoji] = acc[r.emoji] || {
+          count: 0,
+          users: [],
+          hasOwn: false,
+        };
+        acc[r.emoji].count++;
+        acc[r.emoji].users.push(r.username);
+        if (r.user_id === user.id) acc[r.emoji].hasOwn = true;
+        return acc;
+      }, {}),
+    );
+  }
+
+  // ── Render ─────────────────────────────────────────────────
   return (
     <div
       style={{
@@ -311,7 +453,7 @@ export default function Chat({ user }) {
         left: 0,
       }}
     >
-      {/* ══ SIDEBAR (Desktop Only) ══ */}
+      {/* ══ DESKTOP SIDEBAR ══ */}
       {!isMobile && (
         <div
           style={{
@@ -339,7 +481,6 @@ export default function Chat({ user }) {
             }}
           />
 
-          {/* Logo */}
           <div style={{ marginBottom: "30px" }}>
             <div
               style={{
@@ -367,7 +508,6 @@ export default function Chat({ user }) {
             </div>
           </div>
 
-          {/* User */}
           <div
             style={{
               padding: "12px 16px",
@@ -417,7 +557,6 @@ export default function Chat({ user }) {
             </div>
           </div>
 
-          {/* Online */}
           <div
             style={{
               color: "#2a2a3a",
@@ -428,6 +567,7 @@ export default function Chat({ user }) {
           >
             ONLINE — {onlineUsers.length}
           </div>
+
           <div
             style={{
               marginBottom: "16px",
@@ -460,7 +600,6 @@ export default function Chat({ user }) {
             ))}
           </div>
 
-          {/* Channels */}
           <div
             style={{
               display: "flex",
@@ -542,6 +681,7 @@ export default function Chat({ user }) {
                   +
                 </button>
               </div>
+
               <div style={{ display: "flex", gap: "4px" }}>
                 <button
                   onClick={() => setNewRoomPrivate(false)}
@@ -636,7 +776,6 @@ export default function Chat({ user }) {
             </div>
           ))}
 
-          {/* DMs */}
           <div
             style={{
               color: "#2a2a3a",
@@ -648,6 +787,7 @@ export default function Chat({ user }) {
           >
             DIRECT MESSAGES
           </div>
+
           <div
             onClick={() => handleViewChange("dms")}
             style={{
@@ -668,7 +808,6 @@ export default function Chat({ user }) {
             @ messages
           </div>
 
-          {/* Settings */}
           <button
             onClick={() => handleViewChange("settings")}
             style={{
@@ -690,7 +829,6 @@ export default function Chat({ user }) {
             ⚙ SETTINGS
           </button>
 
-          {/* Logout */}
           <button
             onClick={handleLogout}
             style={{
@@ -705,14 +843,6 @@ export default function Chat({ user }) {
               marginTop: "20px",
               width: "100%",
             }}
-            onMouseOver={(e) => {
-              e.currentTarget.style.borderColor = "#440000";
-              e.currentTarget.style.color = "#ff4444";
-            }}
-            onMouseOut={(e) => {
-              e.currentTarget.style.borderColor = "#1a0020";
-              e.currentTarget.style.color = "#3a1a3a";
-            }}
           >
             DISCONNECT
           </button>
@@ -721,7 +851,7 @@ export default function Chat({ user }) {
 
       {/* ══ MOBILE HEADER ══ */}
       {isMobile && (
-        <div style={{ flexShrink: 0 }}>
+        <div style={{ flexShrink: 0, width: "100%" }}>
           <div
             style={{
               padding: "12px 16px",
@@ -767,7 +897,6 @@ export default function Chat({ user }) {
             </div>
           </div>
 
-          {/* Mobile Channel Bar */}
           {view === "chat" && (
             <div
               style={{
@@ -830,7 +959,6 @@ export default function Chat({ user }) {
                 </button>
               ))}
 
-              {/* Add channel button */}
               <button
                 onClick={() => setShowNewRoom(!showNewRoom)}
                 style={{
@@ -849,7 +977,6 @@ export default function Chat({ user }) {
             </div>
           )}
 
-          {/* Mobile New Room Input */}
           {view === "chat" && showNewRoom && (
             <div
               style={{
@@ -858,13 +985,7 @@ export default function Chat({ user }) {
                 borderBottom: "1px solid #0d0d1a",
               }}
             >
-              <div
-                style={{
-                  display: "flex",
-                  gap: "8px",
-                  marginBottom: "6px",
-                }}
-              >
+              <div style={{ display: "flex", gap: "8px", marginBottom: "6px" }}>
                 <input
                   value={newRoomName}
                   onChange={(e) => setNewRoomName(e.target.value)}
@@ -881,7 +1002,22 @@ export default function Chat({ user }) {
                     outline: "none",
                   }}
                 />
+                <button
+                  onClick={createRoom}
+                  style={{
+                    padding: "8px 16px",
+                    border: "none",
+                    borderRadius: "20px",
+                    background: "#9B30FF",
+                    color: "white",
+                    fontSize: "12px",
+                    cursor: "pointer",
+                  }}
+                >
+                  ADD
+                </button>
               </div>
+
               <div style={{ display: "flex", gap: "6px" }}>
                 <button
                   onClick={() => setNewRoomPrivate(false)}
@@ -936,7 +1072,6 @@ export default function Chat({ user }) {
             overflow: "hidden",
           }}
         >
-          {/* Header */}
           <div
             style={{
               padding: isMobile ? "12px 16px" : "20px 30px",
@@ -970,6 +1105,7 @@ export default function Chat({ user }) {
                 {activeRoom?.description || "ENCRYPTED CHANNEL"}
               </div>
             </div>
+
             <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
               <div
                 style={{
@@ -992,13 +1128,12 @@ export default function Chat({ user }) {
             </div>
           </div>
 
-          {/* Messages - SCROLLABLE */}
           <div
             ref={messagesContainerRef}
             style={{
               flex: 1,
               overflowY: "auto",
-              padding: isMobile ? "12px 12px 120px 12px" : "20px 30px",
+              padding: isMobile ? "12px 12px 140px 12px" : "20px 30px",
               display: "flex",
               flexDirection: "column",
               gap: "4px",
@@ -1190,6 +1325,7 @@ export default function Chat({ user }) {
                           </span>
                         )}
                       </div>
+
                       <div
                         style={{
                           color: "#2a2a3a",
@@ -1200,14 +1336,101 @@ export default function Chat({ user }) {
                         {formatTime(msg.created_at)}
                       </div>
                     </div>
+
+                    {reactions[msg.id] && reactions[msg.id].length > 0 && (
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: "4px",
+                          marginTop: "4px",
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        {groupReactionData(msg.id).map(([emoji, data]) => (
+                          <button
+                            key={emoji}
+                            onClick={() => addReaction(msg.id, emoji)}
+                            title={data.users.join(", ")}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "4px",
+                              padding: "2px 8px",
+                              borderRadius: "12px",
+                              fontSize: "13px",
+                              cursor: "pointer",
+                              border: "1px solid",
+                              borderColor: data.hasOwn ? "#9B30FF" : "#1a1a3a",
+                              backgroundColor: data.hasOwn
+                                ? "rgba(155,48,255,0.15)"
+                                : "rgba(255,255,255,0.03)",
+                              color: "#ffffff",
+                            }}
+                          >
+                            <span>{emoji}</span>
+                            <span
+                              style={{
+                                fontSize: "11px",
+                                color: "#8a8aaa",
+                              }}
+                            >
+                              {data.count}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {msg.file_url && (
+                      <div
+                        style={{
+                          marginTop: "6px",
+                          maxWidth: isMobile ? "260px" : "460px",
+                        }}
+                      >
+                        {msg.file_type?.startsWith("image/") ? (
+                          <img
+                            src={msg.file_url}
+                            alt={msg.file_name}
+                            style={{
+                              maxWidth: "100%",
+                              maxHeight: "300px",
+                              borderRadius: "8px",
+                              border: "1px solid #1a1a3a",
+                              cursor: "pointer",
+                            }}
+                            onClick={() => window.open(msg.file_url, "_blank")}
+                          />
+                        ) : (
+                          <a
+                            href={msg.file_url}
+                            download={msg.file_name}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "8px",
+                              padding: "10px 16px",
+                              backgroundColor: "#0a0a15",
+                              border: "1px solid #1a1a3a",
+                              borderRadius: "8px",
+                              color: "#9B30FF",
+                              fontSize: "13px",
+                              textDecoration: "none",
+                            }}
+                          >
+                            📎 {msg.file_name}
+                          </a>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               );
             })}
+
             <div ref={bottomRef} />
           </div>
 
-          {/* Typing */}
           {typingUsers.length > 0 && (
             <div
               style={{
@@ -1223,7 +1446,6 @@ export default function Chat({ user }) {
             </div>
           )}
 
-          {/* Reply bar */}
           {replyTo && (
             <div
               style={{
@@ -1268,7 +1490,6 @@ export default function Chat({ user }) {
             </div>
           )}
 
-          {/* Input - FIXED AT BOTTOM */}
           <div
             style={{
               padding: isMobile ? "10px 12px" : "20px 30px",
@@ -1304,6 +1525,27 @@ export default function Chat({ user }) {
                   outline: "none",
                 }}
               />
+
+              <button
+                type="button"
+                onClick={handleFileUpload}
+                style={{
+                  padding: isMobile ? "12px" : "14px 16px",
+                  border: "1px solid #1a1a3a",
+                  borderRadius: "8px",
+                  backgroundColor: "transparent",
+                  color: "#9B30FF",
+                  fontSize: "18px",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                📎
+              </button>
+
               <button
                 type="submit"
                 style={{
@@ -1332,6 +1574,7 @@ export default function Chat({ user }) {
             display: "flex",
             height: isMobile ? "100vh" : "100vh",
             overflow: "hidden",
+            paddingBottom: isMobile ? "56px" : "0",
           }}
         >
           <DirectMessages currentUser={user} />
@@ -1346,12 +1589,10 @@ export default function Chat({ user }) {
         )
       ) : null}
 
-      {/* Mobile Nav */}
       {isMobile && (
         <MobileNav view={view} onNavigate={handleViewChange} notification={0} />
       )}
 
-      {/* Context Menus */}
       {contextMenu && (
         <ContextMenu
           room={contextMenu.room}
@@ -1361,7 +1602,10 @@ export default function Chat({ user }) {
           onRoomUpdated={refreshRooms}
           onRoomDeleted={(id) => {
             setRooms((prev) => prev.filter((r) => r.id !== id));
-            if (activeRoom?.id === id) setActiveRoom(rooms[0]);
+            if (activeRoom?.id === id) {
+              const remaining = rooms.filter((r) => r.id !== id);
+              setActiveRoom(remaining[0] || null);
+            }
             setContextMenu(null);
           }}
         />
@@ -1374,7 +1618,18 @@ export default function Chat({ user }) {
           position={{ x: messageMenu.x, y: messageMenu.y }}
           onClose={() => setMessageMenu(null)}
           onReply={(msg) => setReplyTo(msg)}
+          onReact={(msg) => setShowEmojiPicker(msg)}
           onMessagesChanged={refreshMessages}
+        />
+      )}
+
+      {showEmojiPicker && (
+        <EmojiPicker
+          onSelect={(emoji) => {
+            addReaction(showEmojiPicker.id, emoji);
+            setShowEmojiPicker(null);
+          }}
+          onClose={() => setShowEmojiPicker(null)}
         />
       )}
     </div>

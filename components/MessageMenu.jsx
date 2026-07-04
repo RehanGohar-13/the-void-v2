@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import { supabase } from "../lib/supabaseClient";
 
 export default function MessageMenu({
@@ -10,6 +10,7 @@ export default function MessageMenu({
   position,
   onClose,
   onReply,
+  onReact,
   onMessagesChanged,
 }) {
   const [view, setView] = useState("menu");
@@ -18,7 +19,6 @@ export default function MessageMenu({
 
   async function deleteMessage() {
     await supabase.from("messages").delete().eq("id", message.id);
-
     onMessagesChanged();
     onClose();
   }
@@ -28,15 +28,10 @@ export default function MessageMenu({
       setError("Message cannot be empty");
       return;
     }
-
     await supabase
       .from("messages")
-      .update({
-        content: editText.trim(),
-        edited: true,
-      })
+      .update({ content: editText.trim(), edited: true })
       .eq("id", message.id);
-
     onMessagesChanged();
     onClose();
   }
@@ -47,9 +42,7 @@ export default function MessageMenu({
   }
 
   function handleOverlayClick(e) {
-    if (e.target === e.currentTarget) {
-      onClose();
-    }
+    if (e.target === e.currentTarget) onClose();
   }
 
   return (
@@ -79,7 +72,6 @@ export default function MessageMenu({
           zIndex: 1001,
         }}
       >
-        {/* ── MAIN MENU ── */}
         {view === "menu" && (
           <>
             <MenuItem
@@ -90,8 +82,15 @@ export default function MessageMenu({
                 onClose();
               }}
             />
+            <MenuItem
+              icon="😀"
+              label="React"
+              onClick={() => {
+                onReact(message);
+                onClose();
+              }}
+            />
             <MenuItem icon="📋" label="Copy Text" onClick={handleCopy} />
-
             {isOwn && (
               <>
                 <div
@@ -117,7 +116,6 @@ export default function MessageMenu({
           </>
         )}
 
-        {/* ── EDIT VIEW ── */}
         {view === "edit" && (
           <div style={{ padding: "8px" }}>
             <div
@@ -131,7 +129,6 @@ export default function MessageMenu({
             >
               EDIT MESSAGE
             </div>
-
             <textarea
               value={editText}
               onChange={(e) => setEditText(e.target.value)}
@@ -150,26 +147,14 @@ export default function MessageMenu({
                 fontFamily: "inherit",
               }}
             />
-
             {error && (
               <div
-                style={{
-                  color: "#ff4444",
-                  fontSize: "11px",
-                  marginTop: "6px",
-                }}
+                style={{ color: "#ff4444", fontSize: "11px", marginTop: "6px" }}
               >
                 {error}
               </div>
             )}
-
-            <div
-              style={{
-                display: "flex",
-                gap: "8px",
-                marginTop: "10px",
-              }}
-            >
+            <div style={{ display: "flex", gap: "8px", marginTop: "10px" }}>
               <button onClick={saveEdit} style={btnSave}>
                 SAVE
               </button>
@@ -180,7 +165,6 @@ export default function MessageMenu({
           </div>
         )}
 
-        {/* ── DELETE CONFIRM ── */}
         {view === "delete" && (
           <div style={{ padding: "8px" }}>
             <div
@@ -194,7 +178,6 @@ export default function MessageMenu({
             >
               DELETE MESSAGE
             </div>
-
             <div
               style={{
                 color: "#4a4a6a",
@@ -210,13 +193,7 @@ export default function MessageMenu({
                 ? message.content.substring(0, 50) + "..."
                 : message.content}
             </div>
-
-            <div
-              style={{
-                display: "flex",
-                gap: "8px",
-              }}
-            >
+            <div style={{ display: "flex", gap: "8px" }}>
               <button onClick={deleteMessage} style={btnDanger}>
                 DELETE
               </button>
@@ -279,7 +256,6 @@ const btnSave = {
   letterSpacing: "2px",
   cursor: "pointer",
 };
-
 const btnCancel = {
   flex: 1,
   padding: "10px",
@@ -291,7 +267,6 @@ const btnCancel = {
   letterSpacing: "2px",
   cursor: "pointer",
 };
-
 const btnDanger = {
   flex: 1,
   padding: "10px",
