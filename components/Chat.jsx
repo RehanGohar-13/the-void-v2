@@ -494,8 +494,15 @@ export default function Chat({ user }) {
           </div>
 
           {showNewRoom && (
-            <div style={{ marginBottom: "8px" }}>
-              <div style={{ display: "flex", gap: "4px", marginBottom: "6px" }}>
+            <div style={{ marginBottom: "8px", paddingRight: "4px" }}>
+              <div
+                style={{
+                  display: "flex",
+                  gap: "6px",
+                  marginBottom: "6px",
+                  alignItems: "center",
+                }}
+              >
                 <input
                   value={newRoomName}
                   onChange={(e) => setNewRoomName(e.target.value)}
@@ -510,21 +517,29 @@ export default function Chat({ user }) {
                     color: "#ffffff",
                     fontSize: "11px",
                     outline: "none",
+                    minWidth: 0,
+                    width: "100%",
+                    boxSizing: "border-box",
                   }}
                 />
                 <button
                   onClick={createRoom}
                   style={{
-                    padding: "6px 10px",
+                    width: "28px",
+                    height: "28px",
                     border: "none",
                     borderRadius: "4px",
                     background: "#9B30FF",
                     color: "white",
-                    fontSize: "10px",
+                    fontSize: "16px",
                     cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexShrink: 0,
                   }}
                 >
-                  ADD
+                  +
                 </button>
               </div>
               <div style={{ display: "flex", gap: "4px" }}>
