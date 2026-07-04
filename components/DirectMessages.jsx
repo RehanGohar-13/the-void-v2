@@ -407,9 +407,27 @@ export default function DirectMessages({ currentUser }) {
 
         <div
           style={{
-            padding: "20px 30px",
+            padding: "10px 12px",
             borderTop: "1px solid #0d0d1a",
             backgroundColor: "#020205",
+            flexShrink: 0,
+            position:
+              typeof window !== "undefined" && window.innerWidth < 768
+                ? "fixed"
+                : "relative",
+            bottom:
+              typeof window !== "undefined" && window.innerWidth < 768
+                ? "56px"
+                : "auto",
+            left:
+              typeof window !== "undefined" && window.innerWidth < 768
+                ? 0
+                : "auto",
+            right:
+              typeof window !== "undefined" && window.innerWidth < 768
+                ? 0
+                : "auto",
+            zIndex: 50,
           }}
         >
           <form onSubmit={sendDM} style={{ display: "flex", gap: "12px" }}>

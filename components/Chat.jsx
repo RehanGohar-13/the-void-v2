@@ -816,7 +816,7 @@ export default function Chat({ user }) {
             flex: 1,
             display: "flex",
             flexDirection: "column",
-            height: isMobile ? "calc(100vh - 200px)" : "100vh",
+            height: isMobile ? "100vh" : "100vh",
             overflow: "hidden",
           }}
         >
@@ -882,7 +882,7 @@ export default function Chat({ user }) {
             style={{
               flex: 1,
               overflowY: "auto",
-              padding: isMobile ? "12px 12px" : "20px 30px",
+              padding: isMobile ? "12px 12px 120px 12px" : "20px 30px",
               display: "flex",
               flexDirection: "column",
               gap: "4px",
@@ -1155,10 +1155,15 @@ export default function Chat({ user }) {
           {/* Input - FIXED AT BOTTOM */}
           <div
             style={{
-              padding: isMobile ? "12px" : "20px 30px",
+              padding: isMobile ? "10px 12px" : "20px 30px",
               borderTop: "1px solid #0d0d1a",
               backgroundColor: "#020205",
               flexShrink: 0,
+              position: isMobile ? "fixed" : "relative",
+              bottom: isMobile ? "56px" : "auto",
+              left: isMobile ? 0 : "auto",
+              right: isMobile ? 0 : "auto",
+              zIndex: isMobile ? 50 : "auto",
             }}
           >
             <form
@@ -1209,7 +1214,7 @@ export default function Chat({ user }) {
           style={{
             flex: 1,
             display: "flex",
-            height: isMobile ? "calc(100vh - 120px)" : "100vh",
+            height: isMobile ? "100vh" : "100vh",
             overflow: "hidden",
           }}
         >
