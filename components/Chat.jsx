@@ -10,6 +10,7 @@ import MobileNav from "./MobileNav";
 import OnlinePanel from "./OnlinePanel";
 import MobileSettings from "./MobileSettings";
 import EmojiPicker from "./EmojiPicker";
+import SettingsPage from "./SettingsPage";
 
 export default function Chat({ user }) {
   const [messages, setMessages] = useState([]);
@@ -59,10 +60,35 @@ export default function Chat({ user }) {
     const { data } = await supabase
       .from("rooms")
       .select("*")
-      .or(
-        `created_by.eq.${user.id},created_by.is.null,is_private.eq.false,id.in.(select room_id from channel_members where user_id = '${user.id}')`,
-      )
+      .or(`created_by.eq.${user.id},created_by.is.null,is_private.eq.false`)
       .order("created_at", { ascending: true });
+
+    // Also load private rooms where user is a member
+    const { data: memberRooms } = await supabase
+      .from("channel_members")
+      .select("room_id")
+      .eq("user_id", user.id);
+
+    let allRooms = data || [];
+
+    if (memberRooms && memberRooms.length > 0) {
+      const memberRoomIds = memberRooms.map((m) => m.room_id);
+      const { data: privateRooms } = await supabase
+        .from("rooms")
+        .select("*")
+        .in("id", memberRoomIds);
+
+      if (privateRooms) {
+        const existingIds = allRooms.map((r) => r.id);
+        privateRooms.forEach((r) => {
+          if (!existingIds.includes(r.id)) {
+            allRooms.push(r);
+          }
+        });
+      }
+    }
+
+    allRooms.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
 
     if (data && data.length > 0) {
       setRooms(data);
@@ -344,22 +370,35 @@ export default function Chat({ user }) {
         return;
       }
 
-      const reader = new FileReader();
-      reader.onload = async (event) => {
-        const base64 = event.target.result;
+      // Generate unique filename
+      const ext = file.name.split(".").pop();
+      const uniqueName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${ext}`;
 
-        await supabase.from("messages").insert({
-          content: `📎 ${file.name}`,
-          username,
-          user_id: user.id,
-          room_id: activeRoom.id,
-          file_url: base64,
-          file_name: file.name,
-          file_type: file.type,
-        });
-      };
+      // Upload to Supabase Storage
+      const { error: uploadError } = await supabase.storage
+        .from("attachments")
+        .upload(uniqueName, file);
 
-      reader.readAsDataURL(file);
+      if (uploadError) {
+        alert("Upload failed: " + uploadError.message);
+        return;
+      }
+
+      // Get public URL
+      const { data: urlData } = supabase.storage
+        .from("attachments")
+        .getPublicUrl(uniqueName);
+
+      // Send message with file
+      await supabase.from("messages").insert({
+        content: `📎 ${file.name}`,
+        username,
+        user_id: user.id,
+        room_id: activeRoom.id,
+        file_url: urlData.publicUrl,
+        file_name: file.name,
+        file_type: file.type,
+      });
     };
 
     input.click();
