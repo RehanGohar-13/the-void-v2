@@ -122,6 +122,13 @@ export default function ContextMenu({
     }
   }
 
+  // Load members when switching to members view
+  useEffect(() => {
+    if (view === "members") {
+      loadMembers();
+    }
+  }, [view]);
+
   return (
     <div
       onClick={handleOverlayClick}
@@ -203,6 +210,18 @@ export default function ContextMenu({
                     label="Channel Info"
                     onClick={() => setView("info")}
                   />
+                  <MenuItem
+                    icon="📋"
+                    label="Channel Info"
+                    onClick={() => setView("info")}
+                  />
+                  {room.is_private && (
+                    <MenuItem
+                      icon="👥"
+                      label="Manage Members"
+                      onClick={() => setView("members")}
+                    />
+                  )}
                   <div
                     style={{
                       height: "1px",

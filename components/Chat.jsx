@@ -786,7 +786,7 @@ export default function Chat({ user }) {
                     flexShrink: 0,
                   }}
                 >
-                  # {room.name}
+                  {room.is_private ? "🔒" : "#"} {room.name}
                 </button>
               ))}
 
