@@ -816,7 +816,7 @@ export default function Chat({ user }) {
             flex: 1,
             display: "flex",
             flexDirection: "column",
-            height: isMobile ? "calc(100vh - 160px)" : "100vh",
+            height: isMobile ? "calc(100vh - 200px)" : "100vh",
             overflow: "hidden",
           }}
         >
@@ -1209,7 +1209,7 @@ export default function Chat({ user }) {
           style={{
             flex: 1,
             display: "flex",
-            height: isMobile ? "calc(100vh - 160px)" : "100vh",
+            height: isMobile ? "calc(100vh - 120px)" : "100vh",
             overflow: "hidden",
           }}
         >
