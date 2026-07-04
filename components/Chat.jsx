@@ -120,21 +120,30 @@ export default function Chat({ user }) {
 
   // Smart scroll
   useEffect(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+
+    // First load: always scroll to bottom
+    if (prevMessageCount.current === 0 && messages.length > 0) {
+      setTimeout(() => {
+        bottomRef.current?.scrollIntoView({ behavior: "instant" });
+      }, 100);
+      prevMessageCount.current = messages.length;
+      return;
+    }
+
+    // New messages arrived
     if (messages.length > prevMessageCount.current) {
-      const container = messagesContainerRef.current;
-      if (container) {
-        const isNearBottom =
-          container.scrollHeight -
-            container.scrollTop -
-            container.clientHeight <
-          150;
-        if (isNearBottom) {
-          setTimeout(() => {
-            bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-          }, 100);
-        }
+      const isNearBottom =
+        container.scrollHeight - container.scrollTop - container.clientHeight <
+        150;
+      if (isNearBottom) {
+        setTimeout(() => {
+          bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+        }, 100);
       }
     }
+
     prevMessageCount.current = messages.length;
   }, [messages]);
 
@@ -627,49 +636,176 @@ export default function Chat({ user }) {
 
       {/* ══ MOBILE HEADER ══ */}
       {isMobile && (
-        <div
-          style={{
-            padding: "12px 16px",
-            backgroundColor: "#050508",
-            borderBottom: "1px solid #0d0d1a",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            flexShrink: 0,
-          }}
-        >
+        <div style={{ flexShrink: 0 }}>
           <div
             style={{
-              fontSize: "18px",
-              fontWeight: "900",
-              letterSpacing: "4px",
-              background: "linear-gradient(135deg, #9B30FF, #00BFFF)",
-              WebkitBackgroundClip: "text",
-              WebkitTextFillColor: "transparent",
-              backgroundClip: "text",
+              padding: "12px 16px",
+              backgroundColor: "#050508",
+              borderBottom: "1px solid #0d0d1a",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
             }}
           >
-            THE VOID
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
             <div
               style={{
-                width: "6px",
-                height: "6px",
-                borderRadius: "50%",
-                backgroundColor: "#00ff00",
-              }}
-            />
-            <span
-              style={{
-                color: "#9B30FF",
-                fontSize: "12px",
-                letterSpacing: "1px",
+                fontSize: "18px",
+                fontWeight: "900",
+                letterSpacing: "4px",
+                background: "linear-gradient(135deg, #9B30FF, #00BFFF)",
+                WebkitBackgroundClip: "text",
+                WebkitTextFillColor: "transparent",
+                backgroundClip: "text",
               }}
             >
-              {username}
-            </span>
+              THE VOID
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <div
+                style={{
+                  width: "6px",
+                  height: "6px",
+                  borderRadius: "50%",
+                  backgroundColor: "#00ff00",
+                }}
+              />
+              <span
+                style={{
+                  color: "#9B30FF",
+                  fontSize: "12px",
+                  letterSpacing: "1px",
+                }}
+              >
+                {username}
+              </span>
+            </div>
           </div>
+
+          {/* Mobile Channel Bar */}
+          {view === "chat" && (
+            <div
+              style={{
+                padding: "8px 12px",
+                backgroundColor: "#020205",
+                borderBottom: "1px solid #0d0d1a",
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+                overflowX: "auto",
+              }}
+            >
+              {rooms.map((room) => (
+                <button
+                  key={room.id}
+                  onClick={() => switchRoom(room)}
+                  onTouchStart={(e) => {
+                    const timer = setTimeout(() => {
+                      handleRightClick(
+                        {
+                          preventDefault: () => {},
+                          clientX: e.touches[0].clientX,
+                          clientY: e.touches[0].clientY,
+                        },
+                        room,
+                      );
+                    }, 500);
+                    e.currentTarget.dataset.longpress = timer;
+                  }}
+                  onTouchEnd={(e) =>
+                    clearTimeout(Number(e.currentTarget.dataset.longpress))
+                  }
+                  onTouchMove={(e) =>
+                    clearTimeout(Number(e.currentTarget.dataset.longpress))
+                  }
+                  style={{
+                    padding: "6px 14px",
+                    borderRadius: "20px",
+                    border: "1px solid",
+                    borderColor:
+                      activeRoom?.id === room.id
+                        ? room.color || "#9B30FF"
+                        : "#1a1a3a",
+                    backgroundColor:
+                      activeRoom?.id === room.id
+                        ? `${room.color || "#9B30FF"}20`
+                        : "transparent",
+                    color:
+                      activeRoom?.id === room.id
+                        ? room.color || "#9B30FF"
+                        : "#4a4a6a",
+                    fontSize: "12px",
+                    letterSpacing: "1px",
+                    cursor: "pointer",
+                    whiteSpace: "nowrap",
+                    flexShrink: 0,
+                  }}
+                >
+                  # {room.name}
+                </button>
+              ))}
+
+              {/* Add channel button */}
+              <button
+                onClick={() => setShowNewRoom(!showNewRoom)}
+                style={{
+                  padding: "6px 12px",
+                  borderRadius: "20px",
+                  border: "1px solid #1a1a3a",
+                  backgroundColor: "transparent",
+                  color: "#9B30FF",
+                  fontSize: "16px",
+                  cursor: "pointer",
+                  flexShrink: 0,
+                }}
+              >
+                +
+              </button>
+            </div>
+          )}
+
+          {/* Mobile New Room Input */}
+          {view === "chat" && showNewRoom && (
+            <div
+              style={{
+                padding: "8px 12px",
+                backgroundColor: "#020205",
+                borderBottom: "1px solid #0d0d1a",
+                display: "flex",
+                gap: "8px",
+              }}
+            >
+              <input
+                value={newRoomName}
+                onChange={(e) => setNewRoomName(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && createRoom()}
+                placeholder="Channel name..."
+                style={{
+                  flex: 1,
+                  padding: "8px 14px",
+                  backgroundColor: "#0a0a15",
+                  border: "1px solid #1a1a3a",
+                  borderRadius: "20px",
+                  color: "#ffffff",
+                  fontSize: "13px",
+                  outline: "none",
+                }}
+              />
+              <button
+                onClick={createRoom}
+                style={{
+                  padding: "8px 16px",
+                  border: "none",
+                  borderRadius: "20px",
+                  background: "#9B30FF",
+                  color: "white",
+                  fontSize: "12px",
+                  cursor: "pointer",
+                }}
+              >
+                ADD
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -680,7 +816,7 @@ export default function Chat({ user }) {
             flex: 1,
             display: "flex",
             flexDirection: "column",
-            height: isMobile ? "calc(100vh - 110px)" : "100vh",
+            height: isMobile ? "calc(100vh - 160px)" : "100vh",
             overflow: "hidden",
           }}
         >
@@ -1073,7 +1209,7 @@ export default function Chat({ user }) {
           style={{
             flex: 1,
             display: "flex",
-            height: isMobile ? "calc(100vh - 110px)" : "100vh",
+            height: isMobile ? "calc(100vh - 160px)" : "100vh",
             overflow: "hidden",
           }}
         >

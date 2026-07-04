@@ -239,6 +239,8 @@ export default function DirectMessages({ currentUser }) {
           display: "flex",
           flexDirection: "column",
           backgroundColor: "#000000",
+          maxHeight: "100%",
+          overflow: "hidden",
         }}
       >
         <div
