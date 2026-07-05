@@ -9,39 +9,43 @@ import MessageMenu from "./MessageMenu";
 import MobileNav from "./MobileNav";
 import OnlinePanel from "./OnlinePanel";
 import MobileSettings from "./MobileSettings";
-import EmojiPicker from "./EmojiPicker";
 import SettingsPage from "./SettingsPage";
+import EmojiPicker from "./EmojiPicker";
+import {
+  Settings,
+  LogOut,
+  Plus,
+  Hash,
+  Lock,
+  MessageCircle,
+  Paperclip,
+  Send,
+} from "lucide-react";
 
 export default function Chat({ user }) {
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState("chat");
-
   const [rooms, setRooms] = useState([]);
   const [activeRoom, setActiveRoom] = useState(null);
   const [showNewRoom, setShowNewRoom] = useState(false);
   const [newRoomName, setNewRoomName] = useState("");
   const [newRoomPrivate, setNewRoomPrivate] = useState(false);
-
   const [onlineUsers, setOnlineUsers] = useState([]);
   const [typingUsers, setTypingUsers] = useState([]);
-
   const [contextMenu, setContextMenu] = useState(null);
   const [messageMenu, setMessageMenu] = useState(null);
   const [replyTo, setReplyTo] = useState(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(null);
   const [reactions, setReactions] = useState({});
-
   const [isMobile, setIsMobile] = useState(false);
 
   const bottomRef = useRef(null);
   const prevMessageCount = useRef(0);
   const messagesContainerRef = useRef(null);
-
   const username = user.user_metadata?.username || user.email;
 
-  // ── Mobile detect ─────────────────────────────────────────
   useEffect(() => {
     function checkMobile() {
       setIsMobile(window.innerWidth < 768);
@@ -51,7 +55,6 @@ export default function Chat({ user }) {
     return () => window.removeEventListener("resize", checkMobile);
   }, []);
 
-  // ── Load rooms ────────────────────────────────────────────
   useEffect(() => {
     loadRooms();
   }, [user.id]);
@@ -63,41 +66,35 @@ export default function Chat({ user }) {
       .or(`created_by.eq.${user.id},created_by.is.null,is_private.eq.false`)
       .order("created_at", { ascending: true });
 
-    // Also load private rooms where user is a member
     const { data: memberRooms } = await supabase
       .from("channel_members")
       .select("room_id")
       .eq("user_id", user.id);
 
     let allRooms = data || [];
-
     if (memberRooms && memberRooms.length > 0) {
-      const memberRoomIds = memberRooms.map((m) => m.room_id);
+      const ids = memberRooms.map((m) => m.room_id);
       const { data: privateRooms } = await supabase
         .from("rooms")
         .select("*")
-        .in("id", memberRoomIds);
-
+        .in("id", ids);
       if (privateRooms) {
         const existingIds = allRooms.map((r) => r.id);
         privateRooms.forEach((r) => {
-          if (!existingIds.includes(r.id)) {
-            allRooms.push(r);
-          }
+          if (!existingIds.includes(r.id)) allRooms.push(r);
         });
       }
     }
-
     allRooms.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
 
-    if (data && data.length > 0) {
-      setRooms(data);
+    if (allRooms.length > 0) {
+      setRooms(allRooms);
       setActiveRoom((prev) => {
         if (prev) {
-          const stillExists = data.find((r) => r.id === prev.id);
-          if (stillExists) return stillExists;
+          const s = allRooms.find((r) => r.id === prev.id);
+          if (s) return s;
         }
-        return data[0];
+        return allRooms[0];
       });
     } else {
       setRooms([]);
@@ -109,7 +106,6 @@ export default function Chat({ user }) {
     await loadRooms();
   }
 
-  // ── Presence ──────────────────────────────────────────────
   useEffect(() => {
     async function updatePresence() {
       await supabase.from("presence").upsert({
@@ -119,68 +115,55 @@ export default function Chat({ user }) {
         last_seen: new Date().toISOString(),
       });
     }
-
     updatePresence();
-    const interval = setInterval(updatePresence, 30000);
-    return () => clearInterval(interval);
+    const i = setInterval(updatePresence, 30000);
+    return () => clearInterval(i);
   }, [user.id, username]);
 
-  // ── Poll online users ─────────────────────────────────────
   useEffect(() => {
     let mounted = true;
-
     async function loadOnline() {
       const cutoff = new Date(Date.now() - 60000).toISOString();
       const { data } = await supabase
         .from("presence")
         .select("*")
         .gte("last_seen", cutoff);
-
       if (mounted) setOnlineUsers(data || []);
     }
-
     loadOnline();
-    const interval = setInterval(loadOnline, 10000);
-
+    const i = setInterval(loadOnline, 10000);
     return () => {
       mounted = false;
-      clearInterval(interval);
+      clearInterval(i);
     };
   }, []);
 
-  // ── Poll messages for active room ─────────────────────────
   useEffect(() => {
     let interval;
     let mounted = true;
-
     async function loadMessages() {
       if (!activeRoom || view !== "chat") return;
-
       const { data } = await supabase
         .from("messages")
         .select("*")
         .eq("room_id", activeRoom.id)
         .order("created_at", { ascending: true })
         .limit(100);
-
       if (mounted && data) {
         setMessages(data);
         setLoading(false);
       }
     }
-
     if (activeRoom && view === "chat") {
       loadMessages();
       interval = setInterval(loadMessages, 5000);
     }
-
     return () => {
       mounted = false;
       if (interval) clearInterval(interval);
     };
   }, [activeRoom, view]);
 
-  // ── Poll reactions ────────────────────────────────────────
   useEffect(() => {
     loadReactions();
   }, [messages]);
@@ -190,13 +173,11 @@ export default function Chat({ user }) {
       setReactions({});
       return;
     }
-
     const ids = messages.map((m) => m.id);
     const { data } = await supabase
       .from("reactions")
       .select("*")
       .in("message_id", ids);
-
     const grouped = {};
     (data || []).forEach((r) => {
       if (!grouped[r.message_id]) grouped[r.message_id] = [];
@@ -205,14 +186,11 @@ export default function Chat({ user }) {
     setReactions(grouped);
   }
 
-  // ── Poll typing indicators ────────────────────────────────
   useEffect(() => {
     let interval;
     let mounted = true;
-
     async function checkTyping() {
       if (!activeRoom || view !== "chat") return;
-
       const cutoff = new Date(Date.now() - 3000).toISOString();
       const { data } = await supabase
         .from("typing")
@@ -220,26 +198,21 @@ export default function Chat({ user }) {
         .eq("room_id", activeRoom.id)
         .gte("typing_at", cutoff)
         .neq("user_id", user.id);
-
       if (mounted) setTypingUsers(data || []);
     }
-
     if (view === "chat") {
       checkTyping();
       interval = setInterval(checkTyping, 2000);
     }
-
     return () => {
       mounted = false;
       if (interval) clearInterval(interval);
     };
   }, [view, activeRoom, user.id]);
 
-  // ── Smart scroll ───────────────────────────────────────────
   useEffect(() => {
     const container = messagesContainerRef.current;
     if (!container) return;
-
     if (prevMessageCount.current === 0 && messages.length > 0) {
       setTimeout(() => {
         bottomRef.current?.scrollIntoView({ behavior: "instant" });
@@ -247,26 +220,20 @@ export default function Chat({ user }) {
       prevMessageCount.current = messages.length;
       return;
     }
-
     if (messages.length > prevMessageCount.current) {
-      const isNearBottom =
+      const near =
         container.scrollHeight - container.scrollTop - container.clientHeight <
         150;
-
-      if (isNearBottom) {
+      if (near)
         setTimeout(() => {
           bottomRef.current?.scrollIntoView({ behavior: "smooth" });
         }, 80);
-      }
     }
-
     prevMessageCount.current = messages.length;
   }, [messages]);
 
-  // ── Helpers ────────────────────────────────────────────────
-  function handleViewChange(newView) {
-    if (newView === view) return;
-    setView(newView);
+  function handleViewChange(v) {
+    if (v !== view) setView(v);
   }
 
   function switchRoom(room) {
@@ -279,17 +246,11 @@ export default function Chat({ user }) {
   async function createRoom() {
     const name = newRoomName.trim();
     if (!name) return;
-
     const { data, error } = await supabase
       .from("rooms")
-      .insert({
-        name,
-        created_by: user.id,
-        is_private: newRoomPrivate,
-      })
+      .insert({ name, created_by: user.id, is_private: newRoomPrivate })
       .select()
       .single();
-
     if (!error && data) {
       setRooms((prev) => [...prev, data]);
       setActiveRoom(data);
@@ -304,26 +265,21 @@ export default function Chat({ user }) {
     e.preventDefault();
     const content = text.trim();
     if (!content || !activeRoom) return;
-
     setText("");
-
     const msgData = {
       content,
       username,
       user_id: user.id,
       room_id: activeRoom.id,
     };
-
     if (replyTo) {
       msgData.reply_to = replyTo.id;
       msgData.reply_to_content = replyTo.content.substring(0, 100);
       msgData.reply_to_username = replyTo.username;
       setReplyTo(null);
     }
-
     const { error } = await supabase.from("messages").insert(msgData);
     if (error) setText(content);
-
     await supabase.from("typing").delete().eq("user_id", user.id);
   }
 
@@ -341,18 +297,13 @@ export default function Chat({ user }) {
     const existing = (reactions[messageId] || []).find(
       (r) => r.user_id === user.id && r.emoji === emoji,
     );
-
     if (existing) {
       await supabase.from("reactions").delete().eq("id", existing.id);
     } else {
-      await supabase.from("reactions").insert({
-        message_id: messageId,
-        user_id: user.id,
-        username,
-        emoji,
-      });
+      await supabase
+        .from("reactions")
+        .insert({ message_id: messageId, user_id: user.id, username, emoji });
     }
-
     await loadReactions();
   }
 
@@ -361,36 +312,25 @@ export default function Chat({ user }) {
     input.type = "file";
     input.accept =
       "image/*,video/*,audio/*,.pdf,.txt,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.zip,.rar,.7z,.py,.js,.html,.css,.json,.xml,.md,.rtf";
-
     input.onchange = async (e) => {
       const file = e.target.files[0];
       if (!file || !activeRoom) return;
-
-      if (file.size > 50 * 1024 * 1024) {
-        alert("File too large. Maximum 50MB.");
+      if (file.size > 25 * 1024 * 1024) {
+        alert("File too large. Maximum 25MB.");
         return;
       }
-
-      // Generate unique filename
       const ext = file.name.split(".").pop();
       const uniqueName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${ext}`;
-
-      // Upload to Supabase Storage
       const { error: uploadError } = await supabase.storage
         .from("attachments")
         .upload(uniqueName, file);
-
       if (uploadError) {
         alert("Upload failed: " + uploadError.message);
         return;
       }
-
-      // Get public URL
       const { data: urlData } = supabase.storage
         .from("attachments")
         .getPublicUrl(uniqueName);
-
-      // Send message with file
       await supabase.from("messages").insert({
         content: `📎 ${file.name}`,
         username,
@@ -401,7 +341,6 @@ export default function Chat({ user }) {
         file_type: file.type,
       });
     };
-
     input.click();
   }
 
@@ -437,38 +376,26 @@ export default function Chat({ user }) {
   async function handleLogout() {
     await supabase
       .from("presence")
-      .update({
-        status: "offline",
-        last_seen: new Date().toISOString(),
-      })
+      .update({ status: "offline", last_seen: new Date().toISOString() })
       .eq("user_id", user.id);
-
     await supabase.auth.signOut();
   }
 
-  function formatTime(timestamp) {
-    const date = new Date(timestamp);
-    const hours = date.getHours().toString().padStart(2, "0");
-    const minutes = date.getMinutes().toString().padStart(2, "0");
-    return `${hours}:${minutes}`;
+  function formatTime(ts) {
+    const d = new Date(ts);
+    return `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
   }
 
-  function getDateDivider(msg, prevMsg) {
-    const date = new Date(msg.created_at).toLocaleDateString();
-    if (!prevMsg) return date;
-    const prevDate = new Date(prevMsg.created_at).toLocaleDateString();
-    return date !== prevDate ? date : null;
+  function getDateDivider(msg, prev) {
+    const d = new Date(msg.created_at).toLocaleDateString();
+    if (!prev) return d;
+    return d !== new Date(prev.created_at).toLocaleDateString() ? d : null;
   }
 
   function groupReactionData(msgId) {
-    const raw = reactions[msgId] || [];
     return Object.entries(
-      raw.reduce((acc, r) => {
-        acc[r.emoji] = acc[r.emoji] || {
-          count: 0,
-          users: [],
-          hasOwn: false,
-        };
+      (reactions[msgId] || []).reduce((acc, r) => {
+        acc[r.emoji] = acc[r.emoji] || { count: 0, users: [], hasOwn: false };
         acc[r.emoji].count++;
         acc[r.emoji].users.push(r.username);
         if (r.user_id === user.id) acc[r.emoji].hasOwn = true;
@@ -477,7 +404,6 @@ export default function Chat({ user }) {
     );
   }
 
-  // ── Render ─────────────────────────────────────────────────
   return (
     <div
       style={{
@@ -607,7 +533,6 @@ export default function Chat({ user }) {
           >
             ONLINE — {onlineUsers.length}
           </div>
-
           <div
             style={{
               marginBottom: "16px",
@@ -663,12 +588,13 @@ export default function Chat({ user }) {
                 background: "transparent",
                 border: "none",
                 color: "#9B30FF",
-                fontSize: "18px",
                 cursor: "pointer",
                 padding: "0 4px",
+                display: "flex",
+                alignItems: "center",
               }}
             >
-              +
+              <Plus size={16} />
             </button>
           </div>
 
@@ -697,7 +623,6 @@ export default function Chat({ user }) {
                     fontSize: "11px",
                     outline: "none",
                     minWidth: 0,
-                    width: "100%",
                     boxSizing: "border-box",
                   }}
                 />
@@ -718,10 +643,9 @@ export default function Chat({ user }) {
                     flexShrink: 0,
                   }}
                 >
-                  +
+                  <Plus size={14} />
                 </button>
               </div>
-
               <div style={{ display: "flex", gap: "4px" }}>
                 <button
                   onClick={() => setNewRoomPrivate(false)}
@@ -740,7 +664,7 @@ export default function Chat({ user }) {
                     color: !newRoomPrivate ? "#00ff00" : "#2a2a3a",
                   }}
                 >
-                  🌐 PUBLIC
+                  PUBLIC
                 </button>
                 <button
                   onClick={() => setNewRoomPrivate(true)}
@@ -759,7 +683,7 @@ export default function Chat({ user }) {
                     color: newRoomPrivate ? "#ff8c00" : "#2a2a3a",
                   }}
                 >
-                  🔒 PRIVATE
+                  PRIVATE
                 </button>
               </div>
             </div>
@@ -771,7 +695,7 @@ export default function Chat({ user }) {
               onClick={() => switchRoom(room)}
               onContextMenu={(e) => handleRightClick(e, room)}
               onTouchStart={(e) => {
-                const timer = setTimeout(() => {
+                const t = setTimeout(() => {
                   handleRightClick(
                     {
                       preventDefault: () => {},
@@ -781,7 +705,7 @@ export default function Chat({ user }) {
                     room,
                   );
                 }, 500);
-                e.currentTarget.dataset.longpress = timer;
+                e.currentTarget.dataset.longpress = t;
               }}
               onTouchEnd={(e) =>
                 clearTimeout(Number(e.currentTarget.dataset.longpress))
@@ -791,12 +715,12 @@ export default function Chat({ user }) {
               }
               style={{
                 padding: "8px 14px",
+                borderRadius: "6px",
+                border: "1px solid",
                 backgroundColor:
                   activeRoom?.id === room.id && view === "chat"
                     ? `${room.color || "#9B30FF"}15`
                     : "transparent",
-                borderRadius: "6px",
-                border: "1px solid",
                 borderColor:
                   activeRoom?.id === room.id && view === "chat"
                     ? `${room.color || "#9B30FF"}40`
@@ -810,9 +734,13 @@ export default function Chat({ user }) {
                 marginBottom: "2px",
                 cursor: "pointer",
                 transition: "all 0.2s",
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
               }}
             >
-              {room.is_private ? "🔒" : "#"} {room.name}
+              {room.is_private ? <Lock size={11} /> : <Hash size={11} />}
+              {room.name}
             </div>
           ))}
 
@@ -827,15 +755,14 @@ export default function Chat({ user }) {
           >
             DIRECT MESSAGES
           </div>
-
           <div
             onClick={() => handleViewChange("dms")}
             style={{
               padding: "8px 14px",
-              backgroundColor:
-                view === "dms" ? "rgba(0,191,255,0.1)" : "transparent",
               borderRadius: "6px",
               border: "1px solid",
+              backgroundColor:
+                view === "dms" ? "rgba(0,191,255,0.1)" : "transparent",
               borderColor:
                 view === "dms" ? "rgba(0,191,255,0.2)" : "transparent",
               color: view === "dms" ? "#00BFFF" : "#2a2a3a",
@@ -843,9 +770,12 @@ export default function Chat({ user }) {
               letterSpacing: "1px",
               marginBottom: "auto",
               cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              gap: "6px",
             }}
           >
-            @ messages
+            <MessageCircle size={13} /> messages
           </div>
 
           <button
@@ -853,9 +783,9 @@ export default function Chat({ user }) {
             style={{
               width: "100%",
               padding: "10px",
+              border: "1px solid",
               backgroundColor:
                 view === "settings" ? "rgba(155,48,255,0.1)" : "transparent",
-              border: "1px solid",
               borderColor:
                 view === "settings" ? "rgba(155,48,255,0.2)" : "#1a1a3a",
               borderRadius: "8px",
@@ -864,9 +794,13 @@ export default function Chat({ user }) {
               letterSpacing: "2px",
               cursor: "pointer",
               marginTop: "8px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "6px",
             }}
           >
-            ⚙ SETTINGS
+            <Settings size={14} /> SETTINGS
           </button>
 
           <button
@@ -880,11 +814,15 @@ export default function Chat({ user }) {
               fontSize: "12px",
               letterSpacing: "2px",
               cursor: "pointer",
-              marginTop: "20px",
+              marginTop: "12px",
               width: "100%",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "6px",
             }}
           >
-            DISCONNECT
+            <LogOut size={14} /> DISCONNECT
           </button>
         </div>
       )}
@@ -954,7 +892,7 @@ export default function Chat({ user }) {
                   key={room.id}
                   onClick={() => switchRoom(room)}
                   onTouchStart={(e) => {
-                    const timer = setTimeout(() => {
+                    const t = setTimeout(() => {
                       handleRightClick(
                         {
                           preventDefault: () => {},
@@ -964,7 +902,7 @@ export default function Chat({ user }) {
                         room,
                       );
                     }, 500);
-                    e.currentTarget.dataset.longpress = timer;
+                    e.currentTarget.dataset.longpress = t;
                   }}
                   onTouchEnd={(e) =>
                     clearTimeout(Number(e.currentTarget.dataset.longpress))
@@ -993,12 +931,15 @@ export default function Chat({ user }) {
                     cursor: "pointer",
                     whiteSpace: "nowrap",
                     flexShrink: 0,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "4px",
                   }}
                 >
-                  {room.is_private ? "🔒" : "#"} {room.name}
+                  {room.is_private ? <Lock size={10} /> : <Hash size={10} />}{" "}
+                  {room.name}
                 </button>
               ))}
-
               <button
                 onClick={() => setShowNewRoom(!showNewRoom)}
                 style={{
@@ -1007,12 +948,13 @@ export default function Chat({ user }) {
                   border: "1px solid #1a1a3a",
                   backgroundColor: "transparent",
                   color: "#9B30FF",
-                  fontSize: "16px",
                   cursor: "pointer",
                   flexShrink: 0,
+                  display: "flex",
+                  alignItems: "center",
                 }}
               >
-                +
+                <Plus size={16} />
               </button>
             </div>
           )}
@@ -1057,7 +999,6 @@ export default function Chat({ user }) {
                   ADD
                 </button>
               </div>
-
               <div style={{ display: "flex", gap: "6px" }}>
                 <button
                   onClick={() => setNewRoomPrivate(false)}
@@ -1075,7 +1016,7 @@ export default function Chat({ user }) {
                     color: !newRoomPrivate ? "#00ff00" : "#2a2a3a",
                   }}
                 >
-                  🌐 PUBLIC
+                  PUBLIC
                 </button>
                 <button
                   onClick={() => setNewRoomPrivate(true)}
@@ -1093,7 +1034,7 @@ export default function Chat({ user }) {
                     color: newRoomPrivate ? "#ff8c00" : "#2a2a3a",
                   }}
                 >
-                  🔒 PRIVATE
+                  PRIVATE
                 </button>
               </div>
             </div>
@@ -1108,7 +1049,7 @@ export default function Chat({ user }) {
             flex: 1,
             display: "flex",
             flexDirection: "column",
-            height: isMobile ? "100vh" : "100vh",
+            height: "100vh",
             overflow: "hidden",
           }}
         >
@@ -1130,9 +1071,17 @@ export default function Chat({ user }) {
                   fontSize: isMobile ? "14px" : "16px",
                   fontWeight: "600",
                   letterSpacing: "2px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
                 }}
               >
-                # {activeRoom?.name || "loading"}
+                {activeRoom?.is_private ? (
+                  <Lock size={14} />
+                ) : (
+                  <Hash size={14} />
+                )}{" "}
+                {activeRoom?.name || "loading"}
               </div>
               <div
                 style={{
@@ -1145,7 +1094,6 @@ export default function Chat({ user }) {
                 {activeRoom?.description || "ENCRYPTED CHANNEL"}
               </div>
             </div>
-
             <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
               <div
                 style={{
@@ -1192,7 +1140,6 @@ export default function Chat({ user }) {
                 LOADING TRANSMISSION...
               </div>
             )}
-
             {!loading && messages.length === 0 && (
               <div
                 style={{
@@ -1215,11 +1162,10 @@ export default function Chat({ user }) {
               const isOwn = msg.user_id === user.id;
               const showName =
                 i === 0 || messages[i - 1]?.user_id !== msg.user_id;
-              const dateDivider = getDateDivider(msg, messages[i - 1]);
-
+              const dd = getDateDivider(msg, messages[i - 1]);
               return (
                 <div key={msg.id}>
-                  {dateDivider && (
+                  {dd && (
                     <div
                       style={{
                         display: "flex",
@@ -1243,7 +1189,7 @@ export default function Chat({ user }) {
                           whiteSpace: "nowrap",
                         }}
                       >
-                        {dateDivider}
+                        {dd}
                       </div>
                       <div
                         style={{
@@ -1258,7 +1204,7 @@ export default function Chat({ user }) {
                   <div
                     onContextMenu={(e) => handleMessageRightClick(e, msg)}
                     onTouchStart={(e) => {
-                      const timer = setTimeout(() => {
+                      const t = setTimeout(() => {
                         handleMessageRightClick(
                           {
                             preventDefault: () => {},
@@ -1268,7 +1214,7 @@ export default function Chat({ user }) {
                           msg,
                         );
                       }, 500);
-                      e.currentTarget.dataset.longpress = timer;
+                      e.currentTarget.dataset.longpress = t;
                     }}
                     onTouchEnd={(e) =>
                       clearTimeout(Number(e.currentTarget.dataset.longpress))
@@ -1365,7 +1311,6 @@ export default function Chat({ user }) {
                           </span>
                         )}
                       </div>
-
                       <div
                         style={{
                           color: "#2a2a3a",
@@ -1409,10 +1354,7 @@ export default function Chat({ user }) {
                           >
                             <span>{emoji}</span>
                             <span
-                              style={{
-                                fontSize: "11px",
-                                color: "#8a8aaa",
-                              }}
+                              style={{ fontSize: "11px", color: "#8a8aaa" }}
                             >
                               {data.count}
                             </span>
@@ -1458,7 +1400,7 @@ export default function Chat({ user }) {
                               textDecoration: "none",
                             }}
                           >
-                            📎 {msg.file_name}
+                            <Paperclip size={14} /> {msg.file_name}
                           </a>
                         )}
                       </div>
@@ -1467,7 +1409,6 @@ export default function Chat({ user }) {
                 </div>
               );
             })}
-
             <div ref={bottomRef} />
           </div>
 
@@ -1565,7 +1506,6 @@ export default function Chat({ user }) {
                   outline: "none",
                 }}
               />
-
               <button
                 type="button"
                 onClick={handleFileUpload}
@@ -1575,7 +1515,6 @@ export default function Chat({ user }) {
                   borderRadius: "8px",
                   backgroundColor: "transparent",
                   color: "#9B30FF",
-                  fontSize: "18px",
                   cursor: "pointer",
                   display: "flex",
                   alignItems: "center",
@@ -1583,9 +1522,8 @@ export default function Chat({ user }) {
                   flexShrink: 0,
                 }}
               >
-                📎
+                <Paperclip size={18} />
               </button>
-
               <button
                 type="submit"
                 style={{
@@ -1600,9 +1538,12 @@ export default function Chat({ user }) {
                   cursor: "pointer",
                   boxShadow: "0 0 20px rgba(155,48,255,0.3)",
                   whiteSpace: "nowrap",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
                 }}
               >
-                {isMobile ? "→" : "TRANSMIT"}
+                {isMobile ? <Send size={16} /> : "TRANSMIT"}
               </button>
             </form>
           </div>
@@ -1612,7 +1553,7 @@ export default function Chat({ user }) {
           style={{
             flex: 1,
             display: "flex",
-            height: isMobile ? "100vh" : "100vh",
+            height: "100vh",
             overflow: "hidden",
             paddingBottom: isMobile ? "56px" : "0",
           }}
@@ -1641,10 +1582,10 @@ export default function Chat({ user }) {
           onClose={() => setContextMenu(null)}
           onRoomUpdated={refreshRooms}
           onRoomDeleted={(id) => {
-            setRooms((prev) => prev.filter((r) => r.id !== id));
+            setRooms((p) => p.filter((r) => r.id !== id));
             if (activeRoom?.id === id) {
-              const remaining = rooms.filter((r) => r.id !== id);
-              setActiveRoom(remaining[0] || null);
+              const rem = rooms.filter((r) => r.id !== id);
+              setActiveRoom(rem[0] || null);
             }
             setContextMenu(null);
           }}

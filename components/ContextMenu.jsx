@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "../lib/supabaseClient";
+import { Pencil, Palette, Info, Users, Trash2 } from "lucide-react";
 
 export default function ContextMenu({
   room,
@@ -17,6 +18,9 @@ export default function ContextMenu({
   const [description, setDesc] = useState(room.description || "");
   const [color, setColor] = useState(room.color || "#9B30FF");
   const [error, setError] = useState("");
+  const [members, setMembers] = useState([]);
+  const [addUsername, setAddUsername] = useState("");
+  const [memberError, setMemberError] = useState("");
 
   const colors = [
     "#9B30FF",
@@ -33,44 +37,9 @@ export default function ContextMenu({
     "#20B2AA",
   ];
 
-  const [members, setMembers] = useState([]);
-  const [allUsers, setAllUsers] = useState([]);
-  const [addUsername, setAddUsername] = useState("");
-  const [memberError, setMemberError] = useState("");
-
-  async function saveChanges() {
-    if (!name.trim()) {
-      setError("Name cannot be empty");
-      return;
-    }
-
-    const { error: err } = await supabase
-      .from("rooms")
-      .update({
-        name: name.trim().toLowerCase(),
-        description: description.trim(),
-        color: color,
-      })
-      .eq("id", room.id);
-
-    if (err) {
-      setError(err.message);
-    } else {
-      onRoomUpdated();
-      onClose();
-    }
-  }
-
-  async function deleteRoom() {
-    // Delete all messages in this room first
-    await supabase.from("messages").delete().eq("room_id", room.id);
-
-    // Then delete the room
-    await supabase.from("rooms").delete().eq("id", room.id);
-
-    onRoomDeleted(room.id);
-    onClose();
-  }
+  useEffect(() => {
+    if (view === "members") loadMembers();
+  }, [view]);
 
   async function loadMembers() {
     const { data } = await supabase
@@ -83,24 +52,20 @@ export default function ContextMenu({
   async function addMember() {
     if (!addUsername.trim()) return;
     setMemberError("");
-
     const { data: profile } = await supabase
       .from("profiles")
       .select("*")
       .eq("username", addUsername.trim())
       .single();
-
     if (!profile) {
       setMemberError("User not found");
       return;
     }
-
     const { error } = await supabase.from("channel_members").insert({
       room_id: room.id,
       user_id: profile.id,
       username: profile.username,
     });
-
     if (error) {
       setMemberError("Already a member");
     } else {
@@ -114,19 +79,37 @@ export default function ContextMenu({
     loadMembers();
   }
 
-  // Close when clicking outside
-  function handleOverlayClick(e) {
-    if (e.target === e.currentTarget) {
+  async function saveChanges() {
+    if (!name.trim()) {
+      setError("Name cannot be empty");
+      return;
+    }
+    const { error: err } = await supabase
+      .from("rooms")
+      .update({
+        name: name.trim(),
+        description: description.trim(),
+        color,
+      })
+      .eq("id", room.id);
+    if (err) {
+      setError(err.message);
+    } else {
+      onRoomUpdated();
       onClose();
     }
   }
 
-  // Load members when switching to members view
-  useEffect(() => {
-    if (view === "members") {
-      loadMembers();
-    }
-  }, [view]);
+  async function deleteRoom() {
+    await supabase.from("messages").delete().eq("room_id", room.id);
+    await supabase.from("rooms").delete().eq("id", room.id);
+    onRoomDeleted(room.id);
+    onClose();
+  }
+
+  function handleOverlayClick(e) {
+    if (e.target === e.currentTarget) onClose();
+  }
 
   return (
     <div
@@ -157,10 +140,8 @@ export default function ContextMenu({
             zIndex: 1001,
           }}
         >
-          {/* ── MAIN MENU ── */}
           {view === "menu" && (
             <>
-              {/* Channel header */}
               <div
                 style={{
                   padding: "8px 12px",
@@ -170,13 +151,13 @@ export default function ContextMenu({
               >
                 <div
                   style={{
-                    color: color,
+                    color,
                     fontSize: "13px",
                     fontWeight: "600",
                     letterSpacing: "1px",
                   }}
                 >
-                  {room.icon || "#"} {room.name}
+                  {room.is_private ? "🔒" : "#"} {room.name}
                 </div>
                 {room.description && (
                   <div
@@ -190,28 +171,26 @@ export default function ContextMenu({
                   </div>
                 )}
               </div>
-
-              {/* Menu items */}
               {isOwner ? (
                 <>
                   <MenuItem
-                    icon="📝"
+                    icon={<Pencil size={14} />}
                     label="Edit Channel"
                     onClick={() => setView("edit")}
                   />
                   <MenuItem
-                    icon="🎨"
+                    icon={<Palette size={14} />}
                     label="Change Color"
                     onClick={() => setView("color")}
                   />
                   <MenuItem
-                    icon="📋"
+                    icon={<Info size={14} />}
                     label="Channel Info"
                     onClick={() => setView("info")}
                   />
                   {room.is_private && (
                     <MenuItem
-                      icon="👥"
+                      icon={<Users size={14} />}
                       label="Manage Members"
                       onClick={() => setView("members")}
                     />
@@ -224,25 +203,22 @@ export default function ContextMenu({
                     }}
                   />
                   <MenuItem
-                    icon="🗑️"
+                    icon={<Trash2 size={14} />}
                     label="Delete Channel"
                     danger
                     onClick={() => setView("delete")}
                   />
                 </>
               ) : (
-                <>
-                  <MenuItem
-                    icon="📋"
-                    label="Channel Info"
-                    onClick={() => setView("info")}
-                  />
-                </>
+                <MenuItem
+                  icon={<Info size={14} />}
+                  label="Channel Info"
+                  onClick={() => setView("info")}
+                />
               )}
             </>
           )}
 
-          {/* ── EDIT VIEW ── */}
           {view === "edit" && (
             <div style={{ padding: "8px" }}>
               <div
@@ -256,7 +232,6 @@ export default function ContextMenu({
               >
                 EDIT CHANNEL
               </div>
-
               <label style={labelStyle}>NAME</label>
               <input
                 value={name}
@@ -264,7 +239,6 @@ export default function ContextMenu({
                 style={inputStyle}
                 placeholder="Channel name"
               />
-
               <label style={labelStyle}>DESCRIPTION</label>
               <input
                 value={description}
@@ -272,7 +246,6 @@ export default function ContextMenu({
                 style={inputStyle}
                 placeholder="What is this channel about?"
               />
-
               {error && (
                 <div
                   style={{
@@ -284,14 +257,7 @@ export default function ContextMenu({
                   {error}
                 </div>
               )}
-
-              <div
-                style={{
-                  display: "flex",
-                  gap: "8px",
-                  marginTop: "12px",
-                }}
-              >
+              <div style={{ display: "flex", gap: "8px", marginTop: "12px" }}>
                 <button onClick={saveChanges} style={btnSave}>
                   SAVE
                 </button>
@@ -302,7 +268,6 @@ export default function ContextMenu({
             </div>
           )}
 
-          {/* ── COLOR VIEW ── */}
           {view === "color" && (
             <div style={{ padding: "8px" }}>
               <div
@@ -316,7 +281,6 @@ export default function ContextMenu({
               >
                 CHANNEL COLOR
               </div>
-
               <div
                 style={{
                   display: "flex",
@@ -344,13 +308,7 @@ export default function ContextMenu({
                   />
                 ))}
               </div>
-
-              <div
-                style={{
-                  display: "flex",
-                  gap: "8px",
-                }}
-              >
+              <div style={{ display: "flex", gap: "8px" }}>
                 <button onClick={saveChanges} style={btnSave}>
                   SAVE
                 </button>
@@ -361,7 +319,6 @@ export default function ContextMenu({
             </div>
           )}
 
-          {/* ── INFO VIEW ── */}
           {view === "info" && (
             <div style={{ padding: "8px" }}>
               <div
@@ -375,8 +332,10 @@ export default function ContextMenu({
               >
                 CHANNEL INFO
               </div>
-
-              <InfoLine label="Name" value={`# ${room.name}`} />
+              <InfoLine
+                label="Name"
+                value={`${room.is_private ? "🔒" : "#"} ${room.name}`}
+              />
               <InfoLine
                 label="Description"
                 value={room.description || "No description"}
@@ -389,7 +348,10 @@ export default function ContextMenu({
                 label="Owner"
                 value={isOwner ? "You" : "Someone else"}
               />
-
+              <InfoLine
+                label="Type"
+                value={room.is_private ? "Private" : "Public"}
+              />
               <button
                 onClick={onClose}
                 style={{ ...btnCancel, marginTop: "12px", width: "100%" }}
@@ -399,7 +361,6 @@ export default function ContextMenu({
             </div>
           )}
 
-          {/* ── MEMBERS VIEW ── */}
           {view === "members" && (
             <div style={{ padding: "8px" }}>
               <div
@@ -413,8 +374,6 @@ export default function ContextMenu({
               >
                 MANAGE MEMBERS
               </div>
-
-              {/* Add member */}
               <div
                 style={{ display: "flex", gap: "4px", marginBottom: "12px" }}
               >
@@ -440,7 +399,6 @@ export default function ContextMenu({
                   ADD
                 </button>
               </div>
-
               {memberError && (
                 <div
                   style={{
@@ -452,61 +410,65 @@ export default function ContextMenu({
                   {memberError}
                 </div>
               )}
-
-              {/* Member list */}
-              {members.map((m) => {
-                const isCreator = m.user_id === room.created_by;
-                return (
-                  <div
-                    key={m.id}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      padding: "6px 0",
-                      borderBottom: "1px solid #0d0d1a",
-                    }}
-                  >
-                    <span
+              {members.length === 0 ? (
+                <div
+                  style={{
+                    color: "#2a2a3a",
+                    fontSize: "12px",
+                    textAlign: "center",
+                  }}
+                >
+                  No members yet
+                </div>
+              ) : (
+                members.map((m) => {
+                  const isCreator = m.user_id === room.created_by;
+                  return (
+                    <div
+                      key={m.id}
                       style={{
-                        color: isCreator ? "#9B30FF" : "#8a8aaa",
-                        fontSize: "12px",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        padding: "6px 0",
+                        borderBottom: "1px solid #0d0d1a",
                       }}
                     >
-                      {m.username || "Owner"} {isCreator ? "(owner)" : ""}
-                    </span>
-                    {!isCreator && (
-                      <button
-                        onClick={() => removeMember(m.id)}
+                      <span
                         style={{
-                          background: "transparent",
-                          border: "none",
-                          color: "#ff4444",
-                          fontSize: "14px",
-                          cursor: "pointer",
+                          color: isCreator ? "#9B30FF" : "#8a8aaa",
+                          fontSize: "12px",
                         }}
                       >
-                        ×
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-
+                        {m.username || "Owner"} {isCreator ? "(owner)" : ""}
+                      </span>
+                      {!isCreator && (
+                        <button
+                          onClick={() => removeMember(m.id)}
+                          style={{
+                            background: "transparent",
+                            border: "none",
+                            color: "#ff4444",
+                            fontSize: "14px",
+                            cursor: "pointer",
+                          }}
+                        >
+                          ×
+                        </button>
+                      )}
+                    </div>
+                  );
+                })
+              )}
               <button
                 onClick={onClose}
-                style={{
-                  ...btnCancel,
-                  marginTop: "12px",
-                  width: "100%",
-                }}
+                style={{ ...btnCancel, marginTop: "12px", width: "100%" }}
               >
                 CLOSE
               </button>
             </div>
           )}
 
-          {/* ── DELETE CONFIRM ── */}
           {view === "delete" && (
             <div style={{ padding: "8px" }}>
               <div
@@ -520,7 +482,6 @@ export default function ContextMenu({
               >
                 DELETE CHANNEL
               </div>
-
               <div
                 style={{
                   color: "#4a4a6a",
@@ -529,17 +490,11 @@ export default function ContextMenu({
                   lineHeight: "1.5",
                 }}
               >
-                This will permanently delete
-                <span style={{ color: color }}> #{room.name} </span>
-                and all its messages. This cannot be undone.
+                This will permanently delete{" "}
+                <span style={{ color }}> #{room.name} </span> and all its
+                messages.
               </div>
-
-              <div
-                style={{
-                  display: "flex",
-                  gap: "8px",
-                }}
-              >
+              <div style={{ display: "flex", gap: "8px" }}>
                 <button onClick={deleteRoom} style={btnDanger}>
                   DELETE FOREVER
                 </button>
@@ -554,8 +509,6 @@ export default function ContextMenu({
     </div>
   );
 }
-
-// ── Helper Components ──────────────────────────────────────
 
 function MenuItem({ icon, label, onClick, danger }) {
   return (
@@ -587,7 +540,7 @@ function MenuItem({ icon, label, onClick, danger }) {
         e.currentTarget.style.color = danger ? "#ff4444" : "#8a8aaa";
       }}
     >
-      <span>{icon}</span>
+      <span style={{ display: "flex", alignItems: "center" }}>{icon}</span>
       <span>{label}</span>
     </button>
   );
@@ -609,8 +562,6 @@ function InfoLine({ label, value }) {
   );
 }
 
-// ── Styles ─────────────────────────────────────────────────
-
 const labelStyle = {
   display: "block",
   color: "#4a4a6a",
@@ -619,7 +570,6 @@ const labelStyle = {
   marginBottom: "4px",
   marginTop: "8px",
 };
-
 const inputStyle = {
   width: "100%",
   padding: "10px 14px",
@@ -631,7 +581,6 @@ const inputStyle = {
   outline: "none",
   boxSizing: "border-box",
 };
-
 const btnSave = {
   flex: 1,
   padding: "10px",
@@ -644,7 +593,6 @@ const btnSave = {
   letterSpacing: "2px",
   cursor: "pointer",
 };
-
 const btnCancel = {
   flex: 1,
   padding: "10px",
@@ -656,7 +604,6 @@ const btnCancel = {
   letterSpacing: "2px",
   cursor: "pointer",
 };
-
 const btnDanger = {
   flex: 1,
   padding: "10px",

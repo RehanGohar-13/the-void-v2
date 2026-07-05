@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { supabase } from "../lib/supabaseClient";
+import { Reply, Smile, Copy, Pencil, Trash2 } from "lucide-react";
 
 export default function MessageMenu({
   message,
@@ -75,7 +76,7 @@ export default function MessageMenu({
         {view === "menu" && (
           <>
             <MenuItem
-              icon="💬"
+              icon={<Reply size={14} />}
               label="Reply"
               onClick={() => {
                 onReply(message);
@@ -83,14 +84,18 @@ export default function MessageMenu({
               }}
             />
             <MenuItem
-              icon="😀"
+              icon={<Smile size={14} />}
               label="React"
               onClick={() => {
                 onReact(message);
                 onClose();
               }}
             />
-            <MenuItem icon="📋" label="Copy Text" onClick={handleCopy} />
+            <MenuItem
+              icon={<Copy size={14} />}
+              label="Copy Text"
+              onClick={handleCopy}
+            />
             {isOwn && (
               <>
                 <div
@@ -101,12 +106,12 @@ export default function MessageMenu({
                   }}
                 />
                 <MenuItem
-                  icon="✏️"
+                  icon={<Pencil size={14} />}
                   label="Edit Message"
                   onClick={() => setView("edit")}
                 />
                 <MenuItem
-                  icon="🗑️"
+                  icon={<Trash2 size={14} />}
                   label="Delete Message"
                   danger
                   onClick={() => setView("delete")}
@@ -238,7 +243,7 @@ function MenuItem({ icon, label, onClick, danger }) {
         e.currentTarget.style.color = danger ? "#ff4444" : "#8a8aaa";
       }}
     >
-      <span>{icon}</span>
+      <span style={{ display: "flex", alignItems: "center" }}>{icon}</span>
       <span>{label}</span>
     </button>
   );

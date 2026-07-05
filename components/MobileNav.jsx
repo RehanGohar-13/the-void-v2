@@ -1,11 +1,13 @@
 "use client";
 
+import { MessageSquare, Mail, Users, Settings } from "lucide-react";
+
 export default function MobileNav({ view, onNavigate, notification }) {
   const tabs = [
-    { key: "chat", icon: "💬", label: "Chat" },
-    { key: "dms", icon: "✉️", label: "DMs", badge: notification },
-    { key: "online", icon: "👥", label: "Online" },
-    { key: "settings", icon: "⚙️", label: "Settings" },
+    { key: "chat", icon: <MessageSquare size={22} />, label: "Chat" },
+    { key: "dms", icon: <Mail size={22} />, label: "DMs", badge: notification },
+    { key: "online", icon: <Users size={22} />, label: "Online" },
+    { key: "settings", icon: <Settings size={22} />, label: "Settings" },
   ];
 
   return (
@@ -36,24 +38,17 @@ export default function MobileNav({ view, onNavigate, notification }) {
             background: "transparent",
             border: "none",
             color: view === tab.key ? "#9B30FF" : "#2a2a3a",
-            fontSize: "20px",
             cursor: "pointer",
             position: "relative",
             padding: "4px 16px",
             transition: "color 0.2s",
           }}
         >
-          <span>{tab.icon}</span>
-          <span
-            style={{
-              fontSize: "9px",
-              letterSpacing: "1px",
-            }}
-          >
+          {tab.icon}
+          <span style={{ fontSize: "9px", letterSpacing: "1px" }}>
             {tab.label}
           </span>
 
-          {/* Notification badge */}
           {tab.badge > 0 && (
             <div
               style={{
