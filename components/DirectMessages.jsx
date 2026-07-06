@@ -334,14 +334,12 @@ export default function DirectMessages({ currentUser }) {
     if (existing) {
       await supabase.from("reactions").delete().eq("id", existing.id);
     } else {
-      await supabase
-        .from("reactions")
-        .insert({
-          message_id: messageId,
-          user_id: currentUser.id,
-          username,
-          emoji,
-        });
+      await supabase.from("reactions").insert({
+        message_id: messageId,
+        user_id: currentUser.id,
+        username,
+        emoji,
+      });
     }
     await loadDMReactions();
   }
@@ -399,8 +397,13 @@ export default function DirectMessages({ currentUser }) {
   }
 
   function handleDMMessageMenu(e, msg) {
-    e.preventDefault();
-    setMessageMenu({ message: msg, x: e.clientX, y: e.clientY });
+    if (e.preventDefault) e.preventDefault();
+    if (e.stopPropagation) e.stopPropagation();
+    setMessageMenu({
+      message: msg,
+      x: Math.min(e.clientX || 0, window.innerWidth - 240),
+      y: Math.min(e.clientY || 0, window.innerHeight - 320),
+    });
   }
 
   // ── DM Chat View ──────────────────────────────────────────
@@ -1365,7 +1368,7 @@ function DMMessageMenu({
         backgroundColor: "rgba(0,0,0,0.5)",
       }}
     >
-      <motion.div
+      <div
         initial={{ opacity: 0, scale: 0.9 }}
         animate={{ opacity: 1, scale: 1 }}
         transition={{ duration: 0.15 }}
@@ -1540,7 +1543,7 @@ function DMMessageMenu({
             </div>
           </div>
         )}
-      </motion.div>
+      </div>
     </div>
   );
 }
