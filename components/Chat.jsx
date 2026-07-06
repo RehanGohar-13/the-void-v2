@@ -1272,39 +1272,43 @@ export default function Chat({ user }) {
                         flexDirection: isOwn ? "row-reverse" : "row",
                       }}
                     >
-                      <div
-                        style={{
-                          maxWidth: isMobile ? "260px" : "460px",
-                          padding: "10px 16px",
-                          borderRadius: isOwn
-                            ? "16px 4px 16px 16px"
-                            : "4px 16px 16px 16px",
-                          background: isOwn
-                            ? "linear-gradient(135deg, #4B0082, #9B30FF)"
-                            : "#0a0a15",
-                          border: isOwn ? "none" : "1px solid #1a1a3a",
-                          color: "#ffffff",
-                          fontSize: isMobile ? "13px" : "14px",
-                          lineHeight: "1.5",
-                          boxShadow: isOwn
-                            ? "0 4px 20px rgba(155,48,255,0.2)"
-                            : "none",
-                          wordBreak: "break-word",
-                        }}
-                      >
-                        {msg.content}
-                        {msg.edited && (
-                          <span
+                      {msg.content &&
+                        msg.content.trim() !== "" &&
+                        !(msg.file_url && !msg.content.trim()) && (
+                          <div
                             style={{
-                              color: "#4a4a6a",
-                              fontSize: "10px",
-                              marginLeft: "8px",
+                              maxWidth: isMobile ? "260px" : "460px",
+                              padding: "10px 16px",
+                              borderRadius: isOwn
+                                ? "16px 4px 16px 16px"
+                                : "4px 16px 16px 16px",
+                              background: isOwn
+                                ? "linear-gradient(135deg, #4B0082, #9B30FF)"
+                                : "#0a0a15",
+                              border: isOwn ? "none" : "1px solid #1a1a3a",
+                              color: "#ffffff",
+                              fontSize: isMobile ? "13px" : "14px",
+                              lineHeight: "1.5",
+                              boxShadow: isOwn
+                                ? "0 4px 20px rgba(155,48,255,0.2)"
+                                : "none",
+                              wordBreak: "break-word",
                             }}
                           >
-                            (edited)
-                          </span>
+                            {msg.file_url ? msg.content.trim() : msg.content}
+                            {msg.edited && (
+                              <span
+                                style={{
+                                  color: "#4a4a6a",
+                                  fontSize: "10px",
+                                  marginLeft: "8px",
+                                }}
+                              >
+                                (edited)
+                              </span>
+                            )}
+                          </div>
                         )}
-                      </div>
                       <div
                         style={{
                           color: "#2a2a3a",
