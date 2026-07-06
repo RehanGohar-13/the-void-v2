@@ -27,9 +27,11 @@ export default function DirectMessages({ currentUser }) {
   const [searchResult, setSearchResult] = useState(null);
   const [searchError, setSearchError] = useState("");
   const [activeChat, setActiveChat] = useState(null);
+
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState("");
   const [notification, setNotification] = useState(0);
+
   const [replyTo, setReplyTo] = useState(null);
   const [messageMenu, setMessageMenu] = useState(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(null);
@@ -39,59 +41,69 @@ export default function DirectMessages({ currentUser }) {
   const bottomRef = useRef(null);
   const prevMsgCount = useRef(0);
   const msgContainerRef = useRef(null);
-  const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
+
   const username = currentUser.user_metadata?.username || currentUser.email;
 
-  // ── Poll friendships ──────────────────────────────────────
+  const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
+
+  // ── Poll friendships / requests ─────────────────────────
   useEffect(() => {
     let mounted = true;
     let interval;
 
-    async function load() {
+    async function loadFriendships() {
       const { data: accepted } = await supabase
         .from("friendships")
         .select("*")
         .or(`from_user.eq.${currentUser.id},to_user.eq.${currentUser.id}`)
         .eq("status", "accepted");
+
       const { data: pending } = await supabase
         .from("friendships")
         .select("*")
         .eq("to_user", currentUser.id)
         .eq("status", "pending");
+
       if (!mounted) return;
+
       setFriends(accepted || []);
       setRequests(pending || []);
       setNotification((pending || []).length);
     }
 
-    load();
+    loadFriendships();
     interval = setInterval(() => {
-      if (mounted && !activeChat) load();
+      if (mounted && !activeChat) loadFriendships();
     }, 5000);
+
     return () => {
       mounted = false;
       clearInterval(interval);
     };
   }, [currentUser.id, activeChat]);
 
-  // ── Poll DM messages ──────────────────────────────────────
+  // ── Poll DM messages ───────────────────────────────────
   useEffect(() => {
     let mounted = true;
     let interval;
 
     async function loadDMs() {
       if (!activeChat) return;
+
       const friendId =
         activeChat.from_user === currentUser.id
           ? activeChat.to_user
           : activeChat.from_user;
+
       const roomId = getRoomId(currentUser.id, friendId);
+
       const { data } = await supabase
         .from("direct_messages")
         .select("*")
         .eq("room_id", roomId)
         .order("created_at", { ascending: true })
         .limit(100);
+
       if (mounted) setMessages(data || []);
     }
 
@@ -99,13 +111,14 @@ export default function DirectMessages({ currentUser }) {
       loadDMs();
       interval = setInterval(loadDMs, 3000);
     }
+
     return () => {
       mounted = false;
       if (interval) clearInterval(interval);
     };
   }, [activeChat, currentUser.id]);
 
-  // ── Poll DM reactions ─────────────────────────────────────
+  // ── Poll reactions for visible DM messages ─────────────
   useEffect(() => {
     loadDMReactions();
   }, [messages]);
@@ -115,54 +128,64 @@ export default function DirectMessages({ currentUser }) {
       setReactions({});
       return;
     }
+
     const ids = messages.map((m) => m.id);
-    // We reuse the reactions table but with direct_message ids
     const { data } = await supabase
       .from("reactions")
       .select("*")
       .in("message_id", ids);
+
     const grouped = {};
     (data || []).forEach((r) => {
       if (!grouped[r.message_id]) grouped[r.message_id] = [];
       grouped[r.message_id].push(r);
     });
+
     setReactions(grouped);
   }
 
-  // ── Poll DM typing ────────────────────────────────────────
+  // ── Poll typing indicators ─────────────────────────────
   useEffect(() => {
     let interval;
     let mounted = true;
+
     async function checkTyping() {
       if (!activeChat) return;
+
       const friendId =
         activeChat.from_user === currentUser.id
           ? activeChat.to_user
           : activeChat.from_user;
+
       const roomId = getRoomId(currentUser.id, friendId);
       const cutoff = new Date(Date.now() - 3000).toISOString();
+
       const { data } = await supabase
         .from("typing")
         .select("*")
         .eq("room_id", roomId)
         .gte("typing_at", cutoff)
         .neq("user_id", currentUser.id);
+
       if (mounted) setTypingUsers(data || []);
     }
+
     if (activeChat) {
       checkTyping();
       interval = setInterval(checkTyping, 2000);
     }
+
     return () => {
       mounted = false;
       if (interval) clearInterval(interval);
     };
   }, [activeChat, currentUser.id]);
 
-  // ── Smart scroll ──────────────────────────────────────────
+  // ── Smart scroll ───────────────────────────────────────
   useEffect(() => {
     const container = msgContainerRef.current;
     if (!container) return;
+
     if (prevMsgCount.current === 0 && messages.length > 0) {
       setTimeout(() => {
         bottomRef.current?.scrollIntoView({ behavior: "instant" });
@@ -170,42 +193,57 @@ export default function DirectMessages({ currentUser }) {
       prevMsgCount.current = messages.length;
       return;
     }
+
     if (messages.length > prevMsgCount.current) {
-      const near =
+      const isNearBottom =
         container.scrollHeight - container.scrollTop - container.clientHeight <
         150;
-      if (near)
+
+      if (isNearBottom) {
         setTimeout(() => {
           bottomRef.current?.scrollIntoView({ behavior: "smooth" });
         }, 80);
+      }
     }
+
     prevMsgCount.current = messages.length;
   }, [messages]);
 
-  // ── Helpers ───────────────────────────────────────────────
+  // ── Helpers ────────────────────────────────────────────
   function getRoomId(a, b) {
     return [a, b].sort().join("_");
   }
 
-  function getFriendName(f) {
-    return f.from_user === currentUser.id ? f.to_username : f.from_username;
+  function getFriendName(friendship) {
+    return friendship.from_user === currentUser.id
+      ? friendship.to_username
+      : friendship.from_username;
   }
 
   function formatTime(ts) {
     const d = new Date(ts);
-    return `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
+    return `${d.getHours().toString().padStart(2, "0")}:${d
+      .getMinutes()
+      .toString()
+      .padStart(2, "0")}`;
   }
 
-  function getDateDivider(msg, prev) {
-    const d = new Date(msg.created_at).toLocaleDateString();
-    if (!prev) return d;
-    return d !== new Date(prev.created_at).toLocaleDateString() ? d : null;
+  function getDateDivider(msg, prevMsg) {
+    const date = new Date(msg.created_at).toLocaleDateString();
+    if (!prevMsg) return date;
+    const prevDate = new Date(prevMsg.created_at).toLocaleDateString();
+    return date !== prevDate ? date : null;
   }
 
-  function groupReactionData(msgId) {
+  function groupReactionData(messageId) {
+    const raw = reactions[messageId] || [];
     return Object.entries(
-      (reactions[msgId] || []).reduce((acc, r) => {
-        acc[r.emoji] = acc[r.emoji] || { count: 0, users: [], hasOwn: false };
+      raw.reduce((acc, r) => {
+        acc[r.emoji] = acc[r.emoji] || {
+          count: 0,
+          users: [],
+          hasOwn: false,
+        };
         acc[r.emoji].count++;
         acc[r.emoji].users.push(r.username);
         if (r.user_id === currentUser.id) acc[r.emoji].hasOwn = true;
@@ -214,24 +252,29 @@ export default function DirectMessages({ currentUser }) {
     );
   }
 
-  // ── Actions ───────────────────────────────────────────────
+  // ── Search / friendships ───────────────────────────────
   async function searchUser() {
     setSearchError("");
     setSearchResult(null);
+
     if (!searchQuery.trim()) return;
+
     if (searchQuery.trim() === username) {
       setSearchError("You cannot add yourself.");
       return;
     }
+
     const { data } = await supabase
       .from("profiles")
       .select("*")
       .eq("username", searchQuery.trim())
       .single();
+
     if (!data) {
       setSearchError("No user found with that exact username.");
       return;
     }
+
     const { data: existing } = await supabase
       .from("friendships")
       .select("*")
@@ -239,6 +282,7 @@ export default function DirectMessages({ currentUser }) {
         `and(from_user.eq.${currentUser.id},to_user.eq.${data.id}),and(from_user.eq.${data.id},to_user.eq.${currentUser.id})`,
       )
       .single();
+
     if (existing) {
       if (existing.status === "accepted") setSearchError("Already friends.");
       else if (existing.status === "pending")
@@ -247,6 +291,7 @@ export default function DirectMessages({ currentUser }) {
         setSearchError("Cannot send request.");
       return;
     }
+
     setSearchResult(data);
   }
 
@@ -258,6 +303,7 @@ export default function DirectMessages({ currentUser }) {
       to_username: toUser.username,
       status: "pending",
     });
+
     if (!error) {
       setSearchResult(null);
       setSearchQuery("");
@@ -286,39 +332,50 @@ export default function DirectMessages({ currentUser }) {
       .eq("id", id);
   }
 
+  // ── DM actions ──────────────────────────────────────────
   async function sendDM(e) {
     e.preventDefault();
     const content = text.trim();
     if (!content || !activeChat) return;
+
     setText("");
+
     const friendId =
       activeChat.from_user === currentUser.id
         ? activeChat.to_user
         : activeChat.from_user;
+
     const roomId = getRoomId(currentUser.id, friendId);
+
     const msgData = {
       content,
       username,
       user_id: currentUser.id,
       room_id: roomId,
     };
+
     if (replyTo) {
       msgData.reply_to = replyTo.id;
       msgData.reply_to_content = replyTo.content.substring(0, 100);
       msgData.reply_to_username = replyTo.username;
       setReplyTo(null);
     }
+
     await supabase.from("direct_messages").insert(msgData);
+
     await supabase.from("typing").delete().eq("user_id", currentUser.id);
   }
 
   async function handleDMTyping() {
     if (!activeChat) return;
+
     const friendId =
       activeChat.from_user === currentUser.id
         ? activeChat.to_user
         : activeChat.from_user;
+
     const roomId = getRoomId(currentUser.id, friendId);
+
     await supabase.from("typing").upsert({
       user_id: currentUser.id,
       username,
@@ -331,6 +388,7 @@ export default function DirectMessages({ currentUser }) {
     const existing = (reactions[messageId] || []).find(
       (r) => r.user_id === currentUser.id && r.emoji === emoji,
     );
+
     if (existing) {
       await supabase.from("reactions").delete().eq("id", existing.id);
     } else {
@@ -341,37 +399,50 @@ export default function DirectMessages({ currentUser }) {
         emoji,
       });
     }
+
     await loadDMReactions();
   }
 
   async function handleDMFileUpload() {
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = "image/*,video/*,audio/*,.pdf,.txt,.doc,.docx,.zip,.rar";
+    input.accept =
+      "image/*,video/*,audio/*,.pdf,.txt,.doc,.docx,.zip,.rar,.7z,.py,.js,.html,.css,.json,.xml,.md,.rtf";
+
     input.onchange = async (e) => {
       const file = e.target.files[0];
       if (!file || !activeChat) return;
+
       if (file.size > 25 * 1024 * 1024) {
-        alert("File too large. Max 25MB.");
+        alert("File too large. Maximum 25MB.");
         return;
       }
+
       const ext = file.name.split(".").pop();
-      const uniqueName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${ext}`;
+      const uniqueName = `${Date.now()}_${Math.random()
+        .toString(36)
+        .substring(7)}.${ext}`;
+
       const { error: uploadError } = await supabase.storage
         .from("attachments")
         .upload(uniqueName, file);
+
       if (uploadError) {
         alert("Upload failed: " + uploadError.message);
         return;
       }
+
       const { data: urlData } = supabase.storage
         .from("attachments")
         .getPublicUrl(uniqueName);
+
       const friendId =
         activeChat.from_user === currentUser.id
           ? activeChat.to_user
           : activeChat.from_user;
+
       const roomId = getRoomId(currentUser.id, friendId);
+
       await supabase.from("direct_messages").insert({
         content: `📎 ${file.name}`,
         username,
@@ -382,6 +453,7 @@ export default function DirectMessages({ currentUser }) {
         file_type: file.type,
       });
     };
+
     input.click();
   }
 
@@ -399,6 +471,7 @@ export default function DirectMessages({ currentUser }) {
   function handleDMMessageMenu(e, msg) {
     if (e.preventDefault) e.preventDefault();
     if (e.stopPropagation) e.stopPropagation();
+
     setMessageMenu({
       message: msg,
       x: Math.min(e.clientX || 0, window.innerWidth - 240),
@@ -406,7 +479,7 @@ export default function DirectMessages({ currentUser }) {
     });
   }
 
-  // ── DM Chat View ──────────────────────────────────────────
+  // ── DM Chat View ────────────────────────────────────────
   if (activeChat) {
     const friendName = getFriendName(activeChat);
 
@@ -455,6 +528,7 @@ export default function DirectMessages({ currentUser }) {
           >
             <ArrowLeft size={14} /> BACK
           </button>
+
           <div
             style={{
               width: "36px",
@@ -471,6 +545,7 @@ export default function DirectMessages({ currentUser }) {
           >
             {friendName.charAt(0).toUpperCase()}
           </div>
+
           <div>
             <div
               style={{
@@ -665,6 +740,7 @@ export default function DirectMessages({ currentUser }) {
                         </span>
                       )}
                     </div>
+
                     <div
                       style={{
                         color: "#2a2a3a",
@@ -761,10 +837,10 @@ export default function DirectMessages({ currentUser }) {
               </div>
             );
           })}
+
           <div ref={bottomRef} />
         </div>
 
-        {/* Typing */}
         {typingUsers.length > 0 && (
           <div
             style={{
@@ -779,7 +855,6 @@ export default function DirectMessages({ currentUser }) {
           </div>
         )}
 
-        {/* Reply bar */}
         {replyTo && (
           <div
             style={{
@@ -824,7 +899,6 @@ export default function DirectMessages({ currentUser }) {
           </div>
         )}
 
-        {/* Input */}
         <div
           style={{
             padding: isMobile ? "10px 12px" : "20px 30px",
@@ -860,6 +934,7 @@ export default function DirectMessages({ currentUser }) {
                 outline: "none",
               }}
             />
+
             <button
               type="button"
               onClick={handleDMFileUpload}
@@ -878,6 +953,7 @@ export default function DirectMessages({ currentUser }) {
             >
               <Paperclip size={18} />
             </button>
+
             <button
               type="submit"
               style={{
@@ -901,7 +977,6 @@ export default function DirectMessages({ currentUser }) {
           </form>
         </div>
 
-        {/* DM Message Menu */}
         {messageMenu && (
           <DMMessageMenu
             message={messageMenu.message}
@@ -915,7 +990,6 @@ export default function DirectMessages({ currentUser }) {
           />
         )}
 
-        {/* Emoji Picker */}
         {showEmojiPicker && (
           <DMEmojiPicker
             onSelect={(emoji) => {
@@ -929,7 +1003,7 @@ export default function DirectMessages({ currentUser }) {
     );
   }
 
-  // ── Main DM Screen ────────────────────────────────────────
+  // ── Main friends / requests / search screen ─────────────
   return (
     <div
       style={{
@@ -1018,6 +1092,7 @@ export default function DirectMessages({ currentUser }) {
                 NO FRIENDS YET.
               </div>
             )}
+
             {friends.map((f) => (
               <button
                 key={f.id}
@@ -1094,6 +1169,7 @@ export default function DirectMessages({ currentUser }) {
                 NO PENDING REQUESTS.
               </div>
             )}
+
             {requests.map((r) => (
               <div
                 key={r.id}
@@ -1123,6 +1199,7 @@ export default function DirectMessages({ currentUser }) {
                 >
                   {r.from_username.charAt(0).toUpperCase()}
                 </div>
+
                 <div style={{ flex: 1 }}>
                   <div
                     style={{
@@ -1137,6 +1214,7 @@ export default function DirectMessages({ currentUser }) {
                     Wants to connect
                   </div>
                 </div>
+
                 <div style={{ display: "flex", gap: "6px" }}>
                   <button
                     onClick={() => acceptRequest(r.id)}
@@ -1155,6 +1233,7 @@ export default function DirectMessages({ currentUser }) {
                   >
                     <UserCheck size={12} /> ACCEPT
                   </button>
+
                   <button
                     onClick={() => declineRequest(r.id)}
                     style={{
@@ -1172,6 +1251,7 @@ export default function DirectMessages({ currentUser }) {
                   >
                     <UserX size={12} /> DECLINE
                   </button>
+
                   <button
                     onClick={() => blockUser(r.id)}
                     style={{
@@ -1212,6 +1292,7 @@ export default function DirectMessages({ currentUser }) {
             >
               ENTER EXACT USERNAME
             </div>
+
             <div style={{ display: "flex", gap: "10px", marginBottom: "16px" }}>
               <input
                 value={searchQuery}
@@ -1233,6 +1314,7 @@ export default function DirectMessages({ currentUser }) {
                   outline: "none",
                 }}
               />
+
               <button
                 onClick={searchUser}
                 style={{
@@ -1253,6 +1335,7 @@ export default function DirectMessages({ currentUser }) {
                 <Search size={14} /> SEARCH
               </button>
             </div>
+
             {searchError && (
               <div
                 style={{
@@ -1263,12 +1346,17 @@ export default function DirectMessages({ currentUser }) {
                   backgroundColor: searchError.includes("sent")
                     ? "rgba(0,255,0,0.05)"
                     : "rgba(255,68,68,0.05)",
-                  border: `1px solid ${searchError.includes("sent") ? "rgba(0,255,0,0.2)" : "rgba(255,68,68,0.2)"}`,
+                  border: `1px solid ${
+                    searchError.includes("sent")
+                      ? "rgba(0,255,0,0.2)"
+                      : "rgba(255,68,68,0.2)"
+                  }`,
                 }}
               >
                 {searchError}
               </div>
             )}
+
             {searchResult && (
               <div
                 style={{
@@ -1298,6 +1386,7 @@ export default function DirectMessages({ currentUser }) {
                 >
                   {searchResult.username.charAt(0).toUpperCase()}
                 </div>
+
                 <div style={{ flex: 1 }}>
                   <div
                     style={{
@@ -1312,6 +1401,7 @@ export default function DirectMessages({ currentUser }) {
                     User found
                   </div>
                 </div>
+
                 <button
                   onClick={() => sendRequest(searchResult)}
                   style={{
@@ -1336,357 +1426,6 @@ export default function DirectMessages({ currentUser }) {
           </motion.div>
         )}
       </AnimatePresence>
-    </div>
-  );
-}
-
-// ── DM Message Menu ─────────────────────────────────────────
-function DMMessageMenu({
-  message,
-  isOwn,
-  position,
-  onClose,
-  onReply,
-  onReact,
-  onEdit,
-  onDelete,
-}) {
-  const [view, setView] = useState("menu");
-  const [editText, setEditText] = useState(message.content);
-
-  function handleOverlay(e) {
-    if (e.target === e.currentTarget) onClose();
-  }
-
-  return (
-    <div
-      onClick={handleOverlay}
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 1000,
-        backgroundColor: "rgba(0,0,0,0.5)",
-      }}
-    >
-      <div
-        initial={{ opacity: 0, scale: 0.9 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{ duration: 0.15 }}
-        style={{
-          position: "fixed",
-          top: Math.min(position.y, window.innerHeight - 280),
-          left: Math.min(position.x, window.innerWidth - 220),
-          backgroundColor: "#0a0a15",
-          border: "1px solid #1a1a3a",
-          borderRadius: "10px",
-          padding: "8px",
-          minWidth: "200px",
-          boxShadow: "0 10px 40px rgba(0,0,0,0.8)",
-          zIndex: 1001,
-        }}
-      >
-        {view === "menu" && (
-          <>
-            <MItem
-              icon={<Reply size={14} />}
-              label="Reply"
-              onClick={() => {
-                onReply(message);
-                onClose();
-              }}
-            />
-            <MItem
-              icon={<Smile size={14} />}
-              label="React"
-              onClick={() => {
-                onReact(message);
-                onClose();
-              }}
-            />
-            <MItem
-              icon={<Copy size={14} />}
-              label="Copy"
-              onClick={() => {
-                navigator.clipboard.writeText(message.content);
-                onClose();
-              }}
-            />
-            {isOwn && (
-              <>
-                <div
-                  style={{
-                    height: "1px",
-                    background: "#1a1a3a",
-                    margin: "4px 0",
-                  }}
-                />
-                <MItem
-                  icon={<Pencil size={14} />}
-                  label="Edit"
-                  onClick={() => setView("edit")}
-                />
-                <MItem
-                  icon={<Trash2 size={14} />}
-                  label="Delete"
-                  danger
-                  onClick={() => setView("delete")}
-                />
-              </>
-            )}
-          </>
-        )}
-
-        {view === "edit" && (
-          <div style={{ padding: "8px" }}>
-            <textarea
-              value={editText}
-              onChange={(e) => setEditText(e.target.value)}
-              rows={3}
-              style={{
-                width: "100%",
-                padding: "10px",
-                backgroundColor: "#050508",
-                border: "1px solid #1a1a3a",
-                borderRadius: "6px",
-                color: "#fff",
-                fontSize: "13px",
-                outline: "none",
-                resize: "vertical",
-                boxSizing: "border-box",
-                fontFamily: "inherit",
-              }}
-            />
-            <div style={{ display: "flex", gap: "8px", marginTop: "8px" }}>
-              <button
-                onClick={() => {
-                  onEdit(message, editText.trim());
-                  onClose();
-                }}
-                style={{
-                  flex: 1,
-                  padding: "8px",
-                  border: "none",
-                  borderRadius: "6px",
-                  background: "linear-gradient(135deg, #4B0082, #9B30FF)",
-                  color: "white",
-                  fontSize: "11px",
-                  cursor: "pointer",
-                }}
-              >
-                SAVE
-              </button>
-              <button
-                onClick={onClose}
-                style={{
-                  flex: 1,
-                  padding: "8px",
-                  border: "1px solid #1a1a3a",
-                  borderRadius: "6px",
-                  backgroundColor: "transparent",
-                  color: "#4a4a6a",
-                  fontSize: "11px",
-                  cursor: "pointer",
-                }}
-              >
-                CANCEL
-              </button>
-            </div>
-          </div>
-        )}
-
-        {view === "delete" && (
-          <div style={{ padding: "8px" }}>
-            <div
-              style={{
-                color: "#ff4444",
-                fontSize: "12px",
-                fontWeight: "600",
-                marginBottom: "8px",
-              }}
-            >
-              DELETE?
-            </div>
-            <div style={{ display: "flex", gap: "8px" }}>
-              <button
-                onClick={() => {
-                  onDelete(message.id);
-                  onClose();
-                }}
-                style={{
-                  flex: 1,
-                  padding: "8px",
-                  border: "none",
-                  borderRadius: "6px",
-                  background: "#440000",
-                  color: "#ff4444",
-                  fontSize: "11px",
-                  cursor: "pointer",
-                }}
-              >
-                DELETE
-              </button>
-              <button
-                onClick={onClose}
-                style={{
-                  flex: 1,
-                  padding: "8px",
-                  border: "1px solid #1a1a3a",
-                  borderRadius: "6px",
-                  backgroundColor: "transparent",
-                  color: "#4a4a6a",
-                  fontSize: "11px",
-                  cursor: "pointer",
-                }}
-              >
-                CANCEL
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function MItem({ icon, label, onClick, danger }) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: "10px",
-        width: "100%",
-        padding: "8px 12px",
-        backgroundColor: "transparent",
-        border: "none",
-        borderRadius: "6px",
-        color: danger ? "#ff4444" : "#8a8aaa",
-        fontSize: "13px",
-        cursor: "pointer",
-        textAlign: "left",
-        transition: "all 0.15s",
-      }}
-      onMouseOver={(e) => {
-        e.currentTarget.style.backgroundColor = danger
-          ? "rgba(255,68,68,0.1)"
-          : "rgba(155,48,255,0.1)";
-        e.currentTarget.style.color = danger ? "#ff4444" : "#fff";
-      }}
-      onMouseOut={(e) => {
-        e.currentTarget.style.backgroundColor = "transparent";
-        e.currentTarget.style.color = danger ? "#ff4444" : "#8a8aaa";
-      }}
-    >
-      <span style={{ display: "flex", alignItems: "center" }}>{icon}</span>
-      <span>{label}</span>
-    </button>
-  );
-}
-
-// ── DM Emoji Picker (reuses same logic) ─────────────────────
-function DMEmojiPicker({ onSelect, onClose }) {
-  const emojis = [
-    "👍",
-    "❤️",
-    "😂",
-    "😮",
-    "😢",
-    "😡",
-    "🔥",
-    "🎉",
-    "💯",
-    "👀",
-    "🚀",
-    "⚡",
-    "💀",
-    "🙏",
-    "💜",
-    "✅",
-    "❌",
-    "🤔",
-    "😎",
-    "🤯",
-    "💪",
-    "🫡",
-    "👑",
-    "⭐",
-  ];
-  return (
-    <div
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 2000,
-        backgroundColor: "rgba(0,0,0,0.6)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          backgroundColor: "#0a0a15",
-          border: "1px solid #1a1a3a",
-          borderRadius: "14px",
-          padding: "16px",
-          boxShadow: "0 20px 60px rgba(0,0,0,0.9)",
-        }}
-      >
-        <div
-          style={{
-            color: "#9B30FF",
-            fontSize: "11px",
-            fontWeight: "700",
-            letterSpacing: "3px",
-            marginBottom: "12px",
-            textAlign: "center",
-          }}
-        >
-          REACT
-        </div>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(8, 1fr)",
-            gap: "2px",
-          }}
-        >
-          {emojis.map((emoji, i) => (
-            <button
-              key={i}
-              onClick={() => {
-                onSelect(emoji);
-                onClose();
-              }}
-              style={{
-                width: "36px",
-                height: "36px",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: "18px",
-                background: "transparent",
-                border: "none",
-                borderRadius: "6px",
-                cursor: "pointer",
-              }}
-              onMouseOver={(e) => {
-                e.currentTarget.style.backgroundColor = "rgba(155,48,255,0.2)";
-              }}
-              onMouseOut={(e) => {
-                e.currentTarget.style.backgroundColor = "transparent";
-              }}
-            >
-              {emoji}
-            </button>
-          ))}
-        </div>
-      </div>
     </div>
   );
 }
