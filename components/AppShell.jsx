@@ -4,29 +4,35 @@ import { useState, useEffect } from "react";
 import { supabase } from "../lib/supabaseClient";
 import Auth from "./Auth";
 import Chat from "./Chat";
-import { useMounted } from "../lib/hooks/useMounted";
 
 export default function AppShell() {
-  const mounted = useMounted();
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let alive = true;
+
     supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!alive) return;
       setUser(session?.user ?? null);
       setLoading(false);
     });
 
     const { data: listener } = supabase.auth.onAuthStateChange(
       (_event, session) => {
+        if (!alive) return;
         setUser(session?.user ?? null);
         setLoading(false);
-      }
+      },
     );
-    return () => listener.subscription.unsubscribe();
+
+    return () => {
+      alive = false;
+      listener.subscription.unsubscribe();
+    };
   }, []);
 
-  if (!mounted || loading) {
+  if (loading) {
     return (
       <div
         style={{

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import { supabase } from "../lib/supabaseClient";
 import {
   Reply,
@@ -27,165 +27,130 @@ export default function DirectMessages({ currentUser }) {
   const [searchResult, setSearchResult] = useState(null);
   const [searchError, setSearchError] = useState("");
   const [activeChat, setActiveChat] = useState(null);
-
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState("");
   const [notification, setNotification] = useState(0);
-
   const [replyTo, setReplyTo] = useState(null);
   const [messageMenu, setMessageMenu] = useState(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(null);
   const [reactions, setReactions] = useState({});
   const [typingUsers, setTypingUsers] = useState([]);
-
   const bottomRef = useRef(null);
   const prevMsgCount = useRef(0);
   const msgContainerRef = useRef(null);
-
   const username = currentUser.user_metadata?.username || currentUser.email;
-
   const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
 
-  // ── Poll friendships / requests ─────────────────────────
   useEffect(() => {
     let mounted = true;
     let interval;
-
-    async function loadFriendships() {
+    async function load() {
       const { data: accepted } = await supabase
         .from("friendships")
         .select("*")
         .or(`from_user.eq.${currentUser.id},to_user.eq.${currentUser.id}`)
         .eq("status", "accepted");
-
       const { data: pending } = await supabase
         .from("friendships")
         .select("*")
         .eq("to_user", currentUser.id)
         .eq("status", "pending");
-
       if (!mounted) return;
-
       setFriends(accepted || []);
       setRequests(pending || []);
       setNotification((pending || []).length);
     }
-
-    loadFriendships();
+    load();
     interval = setInterval(() => {
-      if (mounted && !activeChat) loadFriendships();
+      if (mounted && !activeChat) load();
     }, 5000);
-
     return () => {
       mounted = false;
       clearInterval(interval);
     };
   }, [currentUser.id, activeChat]);
 
-  // ── Poll DM messages ───────────────────────────────────
   useEffect(() => {
     let mounted = true;
     let interval;
-
     async function loadDMs() {
       if (!activeChat) return;
-
-      const friendId =
+      const fid =
         activeChat.from_user === currentUser.id
           ? activeChat.to_user
           : activeChat.from_user;
-
-      const roomId = getRoomId(currentUser.id, friendId);
-
+      const rid = getRoomId(currentUser.id, fid);
       const { data } = await supabase
         .from("direct_messages")
         .select("*")
-        .eq("room_id", roomId)
+        .eq("room_id", rid)
         .order("created_at", { ascending: true })
         .limit(100);
-
       if (mounted) setMessages(data || []);
     }
-
     if (activeChat) {
       loadDMs();
       interval = setInterval(loadDMs, 3000);
     }
-
     return () => {
       mounted = false;
       if (interval) clearInterval(interval);
     };
   }, [activeChat, currentUser.id]);
 
-  // ── Poll reactions for visible DM messages ─────────────
   useEffect(() => {
-    loadDMReactions();
-  }, [messages]);
-
-  async function loadDMReactions() {
     if (!messages.length) {
       setReactions({});
       return;
     }
+    async function lr() {
+      const ids = messages.map((m) => m.id);
+      const { data } = await supabase
+        .from("reactions")
+        .select("*")
+        .in("message_id", ids);
+      const g = {};
+      (data || []).forEach((r) => {
+        if (!g[r.message_id]) g[r.message_id] = [];
+        g[r.message_id].push(r);
+      });
+      setReactions(g);
+    }
+    lr();
+  }, [messages]);
 
-    const ids = messages.map((m) => m.id);
-    const { data } = await supabase
-      .from("reactions")
-      .select("*")
-      .in("message_id", ids);
-
-    const grouped = {};
-    (data || []).forEach((r) => {
-      if (!grouped[r.message_id]) grouped[r.message_id] = [];
-      grouped[r.message_id].push(r);
-    });
-
-    setReactions(grouped);
-  }
-
-  // ── Poll typing indicators ─────────────────────────────
   useEffect(() => {
     let interval;
     let mounted = true;
-
-    async function checkTyping() {
+    async function check() {
       if (!activeChat) return;
-
-      const friendId =
+      const fid =
         activeChat.from_user === currentUser.id
           ? activeChat.to_user
           : activeChat.from_user;
-
-      const roomId = getRoomId(currentUser.id, friendId);
+      const rid = getRoomId(currentUser.id, fid);
       const cutoff = new Date(Date.now() - 3000).toISOString();
-
       const { data } = await supabase
         .from("typing")
         .select("*")
-        .eq("room_id", roomId)
+        .eq("room_id", rid)
         .gte("typing_at", cutoff)
         .neq("user_id", currentUser.id);
-
       if (mounted) setTypingUsers(data || []);
     }
-
     if (activeChat) {
-      checkTyping();
-      interval = setInterval(checkTyping, 2000);
+      check();
+      interval = setInterval(check, 2000);
     }
-
     return () => {
       mounted = false;
       if (interval) clearInterval(interval);
     };
   }, [activeChat, currentUser.id]);
 
-  // ── Smart scroll ───────────────────────────────────────
   useEffect(() => {
-    const container = msgContainerRef.current;
-    if (!container) return;
-
+    const c = msgContainerRef.current;
+    if (!c) return;
     if (prevMsgCount.current === 0 && messages.length > 0) {
       setTimeout(() => {
         bottomRef.current?.scrollIntoView({ behavior: "instant" });
@@ -193,88 +158,60 @@ export default function DirectMessages({ currentUser }) {
       prevMsgCount.current = messages.length;
       return;
     }
-
     if (messages.length > prevMsgCount.current) {
-      const isNearBottom =
-        container.scrollHeight - container.scrollTop - container.clientHeight <
-        150;
-
-      if (isNearBottom) {
+      const near = c.scrollHeight - c.scrollTop - c.clientHeight < 150;
+      if (near)
         setTimeout(() => {
           bottomRef.current?.scrollIntoView({ behavior: "smooth" });
         }, 80);
-      }
     }
-
     prevMsgCount.current = messages.length;
   }, [messages]);
 
-  // ── Helpers ────────────────────────────────────────────
   function getRoomId(a, b) {
     return [a, b].sort().join("_");
   }
-
-  function getFriendName(friendship) {
-    return friendship.from_user === currentUser.id
-      ? friendship.to_username
-      : friendship.from_username;
+  function getFriendName(f) {
+    return f.from_user === currentUser.id ? f.to_username : f.from_username;
   }
-
   function formatTime(ts) {
     const d = new Date(ts);
-    return `${d.getHours().toString().padStart(2, "0")}:${d
-      .getMinutes()
-      .toString()
-      .padStart(2, "0")}`;
+    return `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
   }
-
-  function getDateDivider(msg, prevMsg) {
-    const date = new Date(msg.created_at).toLocaleDateString();
-    if (!prevMsg) return date;
-    const prevDate = new Date(prevMsg.created_at).toLocaleDateString();
-    return date !== prevDate ? date : null;
+  function getDateDivider(msg, prev) {
+    const d = new Date(msg.created_at).toLocaleDateString();
+    if (!prev) return d;
+    return d !== new Date(prev.created_at).toLocaleDateString() ? d : null;
   }
-
-  function groupReactionData(messageId) {
-    const raw = reactions[messageId] || [];
+  function groupReactionData(mid) {
     return Object.entries(
-      raw.reduce((acc, r) => {
-        acc[r.emoji] = acc[r.emoji] || {
-          count: 0,
-          users: [],
-          hasOwn: false,
-        };
-        acc[r.emoji].count++;
-        acc[r.emoji].users.push(r.username);
-        if (r.user_id === currentUser.id) acc[r.emoji].hasOwn = true;
-        return acc;
+      (reactions[mid] || []).reduce((a, r) => {
+        a[r.emoji] = a[r.emoji] || { count: 0, users: [], hasOwn: false };
+        a[r.emoji].count++;
+        a[r.emoji].users.push(r.username);
+        if (r.user_id === currentUser.id) a[r.emoji].hasOwn = true;
+        return a;
       }, {}),
     );
   }
 
-  // ── Search / friendships ───────────────────────────────
   async function searchUser() {
     setSearchError("");
     setSearchResult(null);
-
     if (!searchQuery.trim()) return;
-
     if (searchQuery.trim() === username) {
       setSearchError("You cannot add yourself.");
       return;
     }
-
     const { data } = await supabase
       .from("profiles")
       .select("*")
       .eq("username", searchQuery.trim())
       .single();
-
     if (!data) {
-      setSearchError("No user found with that exact username.");
+      setSearchError("No user found.");
       return;
     }
-
     const { data: existing } = await supabase
       .from("friendships")
       .select("*")
@@ -282,49 +219,43 @@ export default function DirectMessages({ currentUser }) {
         `and(from_user.eq.${currentUser.id},to_user.eq.${data.id}),and(from_user.eq.${data.id},to_user.eq.${currentUser.id})`,
       )
       .single();
-
     if (existing) {
       if (existing.status === "accepted") setSearchError("Already friends.");
       else if (existing.status === "pending")
-        setSearchError("Request already pending.");
-      else if (existing.status === "blocked")
-        setSearchError("Cannot send request.");
+        setSearchError("Request pending.");
+      else if (existing.status === "blocked") setSearchError("Cannot send.");
       return;
     }
-
     setSearchResult(data);
   }
-
   async function sendRequest(toUser) {
-    const { error } = await supabase.from("friendships").insert({
-      from_user: currentUser.id,
-      to_user: toUser.id,
-      from_username: username,
-      to_username: toUser.username,
-      status: "pending",
-    });
-
+    const { error } = await supabase
+      .from("friendships")
+      .insert({
+        from_user: currentUser.id,
+        to_user: toUser.id,
+        from_username: username,
+        to_username: toUser.username,
+        status: "pending",
+      });
     if (!error) {
       setSearchResult(null);
       setSearchQuery("");
       setSearchError("Request sent!");
     }
   }
-
   async function acceptRequest(id) {
     await supabase
       .from("friendships")
       .update({ status: "accepted" })
       .eq("id", id);
   }
-
   async function declineRequest(id) {
     await supabase
       .from("friendships")
       .update({ status: "declined" })
       .eq("id", id);
   }
-
   async function blockUser(id) {
     await supabase
       .from("friendships")
@@ -332,146 +263,111 @@ export default function DirectMessages({ currentUser }) {
       .eq("id", id);
   }
 
-  // ── DM actions ──────────────────────────────────────────
   async function sendDM(e) {
     e.preventDefault();
     const content = text.trim();
     if (!content || !activeChat) return;
-
     setText("");
-
-    const friendId =
+    const fid =
       activeChat.from_user === currentUser.id
         ? activeChat.to_user
         : activeChat.from_user;
-
-    const roomId = getRoomId(currentUser.id, friendId);
-
+    const rid = getRoomId(currentUser.id, fid);
     const msgData = {
       content,
       username,
       user_id: currentUser.id,
-      room_id: roomId,
+      room_id: rid,
     };
-
     if (replyTo) {
       msgData.reply_to = replyTo.id;
       msgData.reply_to_content = replyTo.content.substring(0, 100);
       msgData.reply_to_username = replyTo.username;
       setReplyTo(null);
     }
-
     await supabase.from("direct_messages").insert(msgData);
-
     await supabase.from("typing").delete().eq("user_id", currentUser.id);
   }
-
   async function handleDMTyping() {
     if (!activeChat) return;
-
-    const friendId =
+    const fid =
       activeChat.from_user === currentUser.id
         ? activeChat.to_user
         : activeChat.from_user;
-
-    const roomId = getRoomId(currentUser.id, friendId);
-
-    await supabase.from("typing").upsert({
-      user_id: currentUser.id,
-      username,
-      room_id: roomId,
-      typing_at: new Date().toISOString(),
-    });
+    await supabase
+      .from("typing")
+      .upsert({
+        user_id: currentUser.id,
+        username,
+        room_id: getRoomId(currentUser.id, fid),
+        typing_at: new Date().toISOString(),
+      });
   }
-
-  async function addDMReaction(messageId, emoji) {
-    const existing = (reactions[messageId] || []).find(
+  async function addDMReaction(mid, emoji) {
+    const existing = (reactions[mid] || []).find(
       (r) => r.user_id === currentUser.id && r.emoji === emoji,
     );
-
     if (existing) {
       await supabase.from("reactions").delete().eq("id", existing.id);
     } else {
-      await supabase.from("reactions").insert({
-        message_id: messageId,
-        user_id: currentUser.id,
-        username,
-        emoji,
-      });
+      await supabase
+        .from("reactions")
+        .insert({ message_id: mid, user_id: currentUser.id, username, emoji });
     }
-
-    await loadDMReactions();
   }
-
   async function handleDMFileUpload() {
     const input = document.createElement("input");
     input.type = "file";
-    input.accept =
-      "image/*,video/*,audio/*,.pdf,.txt,.doc,.docx,.zip,.rar,.7z,.py,.js,.html,.css,.json,.xml,.md,.rtf";
-
+    input.accept = "image/*,video/*,audio/*,.pdf,.txt,.doc,.docx,.zip,.rar";
     input.onchange = async (e) => {
       const file = e.target.files[0];
       if (!file || !activeChat) return;
-
       if (file.size > 25 * 1024 * 1024) {
-        alert("File too large. Maximum 25MB.");
+        alert("Max 25MB.");
         return;
       }
-
       const ext = file.name.split(".").pop();
-      const uniqueName = `${Date.now()}_${Math.random()
-        .toString(36)
-        .substring(7)}.${ext}`;
-
-      const { error: uploadError } = await supabase.storage
+      const un = `${Date.now()}_${Math.random().toString(36).substring(7)}.${ext}`;
+      const { error: ue } = await supabase.storage
         .from("attachments")
-        .upload(uniqueName, file);
-
-      if (uploadError) {
-        alert("Upload failed: " + uploadError.message);
+        .upload(un, file);
+      if (ue) {
+        alert("Upload failed.");
         return;
       }
-
-      const { data: urlData } = supabase.storage
+      const { data: ud } = supabase.storage
         .from("attachments")
-        .getPublicUrl(uniqueName);
-
-      const friendId =
+        .getPublicUrl(un);
+      const fid =
         activeChat.from_user === currentUser.id
           ? activeChat.to_user
           : activeChat.from_user;
-
-      const roomId = getRoomId(currentUser.id, friendId);
-
-      await supabase.from("direct_messages").insert({
-        content: `📎 ${file.name}`,
-        username,
-        user_id: currentUser.id,
-        room_id: roomId,
-        file_url: urlData.publicUrl,
-        file_name: file.name,
-        file_type: file.type,
-      });
+      await supabase
+        .from("direct_messages")
+        .insert({
+          content: `📎 ${file.name}`,
+          username,
+          user_id: currentUser.id,
+          room_id: getRoomId(currentUser.id, fid),
+          file_url: ud.publicUrl,
+          file_name: file.name,
+          file_type: file.type,
+        });
     };
-
     input.click();
   }
-
-  async function editDMMessage(msg, newContent) {
+  async function editDMMessage(msg, nc) {
     await supabase
       .from("direct_messages")
-      .update({ content: newContent, edited: true })
+      .update({ content: nc, edited: true })
       .eq("id", msg.id);
   }
-
   async function deleteDMMessage(id) {
     await supabase.from("direct_messages").delete().eq("id", id);
   }
-
   function handleDMMessageMenu(e, msg) {
     if (e.preventDefault) e.preventDefault();
     if (e.stopPropagation) e.stopPropagation();
-
     setMessageMenu({
       message: msg,
       x: Math.min(e.clientX || 0, window.innerWidth - 240),
@@ -479,10 +375,8 @@ export default function DirectMessages({ currentUser }) {
     });
   }
 
-  // ── DM Chat View ────────────────────────────────────────
   if (activeChat) {
-    const friendName = getFriendName(activeChat);
-
+    const fn = getFriendName(activeChat);
     return (
       <div
         style={{
@@ -494,7 +388,6 @@ export default function DirectMessages({ currentUser }) {
           overflow: "hidden",
         }}
       >
-        {/* Header */}
         <div
           style={{
             padding: isMobile ? "12px 16px" : "20px 30px",
@@ -523,12 +416,10 @@ export default function DirectMessages({ currentUser }) {
               alignItems: "center",
               gap: "4px",
               fontSize: "12px",
-              letterSpacing: "1px",
             }}
           >
             <ArrowLeft size={14} /> BACK
           </button>
-
           <div
             style={{
               width: "36px",
@@ -543,9 +434,8 @@ export default function DirectMessages({ currentUser }) {
               fontWeight: "700",
             }}
           >
-            {friendName.charAt(0).toUpperCase()}
+            {fn.charAt(0).toUpperCase()}
           </div>
-
           <div>
             <div
               style={{
@@ -555,7 +445,7 @@ export default function DirectMessages({ currentUser }) {
                 letterSpacing: "1px",
               }}
             >
-              {friendName}
+              {fn}
             </div>
             <div
               style={{
@@ -569,7 +459,6 @@ export default function DirectMessages({ currentUser }) {
           </div>
         </div>
 
-        {/* Messages */}
         <div
           ref={msgContainerRef}
           style={{
@@ -594,13 +483,11 @@ export default function DirectMessages({ currentUser }) {
               START YOUR PRIVATE TRANSMISSION
             </div>
           )}
-
           {messages.map((msg, i) => {
             const isOwn = msg.user_id === currentUser.id;
             const showName =
               i === 0 || messages[i - 1]?.user_id !== msg.user_id;
             const dd = getDateDivider(msg, messages[i - 1]);
-
             return (
               <div key={msg.id}>
                 {dd && (
@@ -629,7 +516,6 @@ export default function DirectMessages({ currentUser }) {
                     />
                   </div>
                 )}
-
                 <div
                   onContextMenu={(e) => handleDMMessageMenu(e, msg)}
                   onTouchStart={(e) => {
@@ -670,7 +556,6 @@ export default function DirectMessages({ currentUser }) {
                       {isOwn ? "YOU" : msg.username}
                     </div>
                   )}
-
                   {msg.reply_to_content && (
                     <div
                       style={{
@@ -698,7 +583,6 @@ export default function DirectMessages({ currentUser }) {
                       </div>
                     </div>
                   )}
-
                   <div
                     style={{
                       display: "flex",
@@ -740,7 +624,6 @@ export default function DirectMessages({ currentUser }) {
                         </span>
                       )}
                     </div>
-
                     <div
                       style={{
                         color: "#2a2a3a",
@@ -751,7 +634,6 @@ export default function DirectMessages({ currentUser }) {
                       {formatTime(msg.created_at)}
                     </div>
                   </div>
-
                   {reactions[msg.id] && reactions[msg.id].length > 0 && (
                     <div
                       style={{
@@ -790,7 +672,6 @@ export default function DirectMessages({ currentUser }) {
                       ))}
                     </div>
                   )}
-
                   {msg.file_url && (
                     <div
                       style={{
@@ -837,7 +718,6 @@ export default function DirectMessages({ currentUser }) {
               </div>
             );
           })}
-
           <div ref={bottomRef} />
         </div>
 
@@ -922,7 +802,7 @@ export default function DirectMessages({ currentUser }) {
                 setText(e.target.value);
                 handleDMTyping();
               }}
-              placeholder={`Message ${friendName}...`}
+              placeholder={`Message ${fn}...`}
               style={{
                 flex: 1,
                 padding: isMobile ? "12px 14px" : "14px 20px",
@@ -934,7 +814,6 @@ export default function DirectMessages({ currentUser }) {
                 outline: "none",
               }}
             />
-
             <button
               type="button"
               onClick={handleDMFileUpload}
@@ -953,7 +832,6 @@ export default function DirectMessages({ currentUser }) {
             >
               <Paperclip size={18} />
             </button>
-
             <button
               type="submit"
               style={{
@@ -989,7 +867,6 @@ export default function DirectMessages({ currentUser }) {
             onDelete={deleteDMMessage}
           />
         )}
-
         {showEmojiPicker && (
           <DMEmojiPicker
             onSelect={(emoji) => {
@@ -1003,7 +880,6 @@ export default function DirectMessages({ currentUser }) {
     );
   }
 
-  // ── Main friends / requests / search screen ─────────────
   return (
     <div
       style={{
@@ -1030,7 +906,6 @@ export default function DirectMessages({ currentUser }) {
       >
         DIRECT MESSAGES
       </div>
-
       <div
         style={{
           height: "1px",
@@ -1092,7 +967,6 @@ export default function DirectMessages({ currentUser }) {
                 NO FRIENDS YET.
               </div>
             )}
-
             {friends.map((f) => (
               <button
                 key={f.id}
@@ -1169,7 +1043,6 @@ export default function DirectMessages({ currentUser }) {
                 NO PENDING REQUESTS.
               </div>
             )}
-
             {requests.map((r) => (
               <div
                 key={r.id}
@@ -1199,7 +1072,6 @@ export default function DirectMessages({ currentUser }) {
                 >
                   {r.from_username.charAt(0).toUpperCase()}
                 </div>
-
                 <div style={{ flex: 1 }}>
                   <div
                     style={{
@@ -1214,7 +1086,6 @@ export default function DirectMessages({ currentUser }) {
                     Wants to connect
                   </div>
                 </div>
-
                 <div style={{ display: "flex", gap: "6px" }}>
                   <button
                     onClick={() => acceptRequest(r.id)}
@@ -1233,7 +1104,6 @@ export default function DirectMessages({ currentUser }) {
                   >
                     <UserCheck size={12} /> ACCEPT
                   </button>
-
                   <button
                     onClick={() => declineRequest(r.id)}
                     style={{
@@ -1251,7 +1121,6 @@ export default function DirectMessages({ currentUser }) {
                   >
                     <UserX size={12} /> DECLINE
                   </button>
-
                   <button
                     onClick={() => blockUser(r.id)}
                     style={{
@@ -1292,7 +1161,6 @@ export default function DirectMessages({ currentUser }) {
             >
               ENTER EXACT USERNAME
             </div>
-
             <div style={{ display: "flex", gap: "10px", marginBottom: "16px" }}>
               <input
                 value={searchQuery}
@@ -1314,7 +1182,6 @@ export default function DirectMessages({ currentUser }) {
                   outline: "none",
                 }}
               />
-
               <button
                 onClick={searchUser}
                 style={{
@@ -1335,7 +1202,6 @@ export default function DirectMessages({ currentUser }) {
                 <Search size={14} /> SEARCH
               </button>
             </div>
-
             {searchError && (
               <div
                 style={{
@@ -1346,17 +1212,12 @@ export default function DirectMessages({ currentUser }) {
                   backgroundColor: searchError.includes("sent")
                     ? "rgba(0,255,0,0.05)"
                     : "rgba(255,68,68,0.05)",
-                  border: `1px solid ${
-                    searchError.includes("sent")
-                      ? "rgba(0,255,0,0.2)"
-                      : "rgba(255,68,68,0.2)"
-                  }`,
+                  border: `1px solid ${searchError.includes("sent") ? "rgba(0,255,0,0.2)" : "rgba(255,68,68,0.2)"}`,
                 }}
               >
                 {searchError}
               </div>
             )}
-
             {searchResult && (
               <div
                 style={{
@@ -1386,7 +1247,6 @@ export default function DirectMessages({ currentUser }) {
                 >
                   {searchResult.username.charAt(0).toUpperCase()}
                 </div>
-
                 <div style={{ flex: 1 }}>
                   <div
                     style={{
@@ -1401,7 +1261,6 @@ export default function DirectMessages({ currentUser }) {
                     User found
                   </div>
                 </div>
-
                 <button
                   onClick={() => sendRequest(searchResult)}
                   style={{
@@ -1426,6 +1285,347 @@ export default function DirectMessages({ currentUser }) {
           </motion.div>
         )}
       </AnimatePresence>
+    </div>
+  );
+}
+
+function DMMessageMenu({
+  message,
+  isOwn,
+  position,
+  onClose,
+  onReply,
+  onReact,
+  onEdit,
+  onDelete,
+}) {
+  const [view, setView] = useState("menu");
+  const [editText, setEditText] = useState(message.content);
+  return (
+    <div
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 1000,
+        backgroundColor: "rgba(0,0,0,0.5)",
+      }}
+    >
+      <div
+        style={{
+          position: "fixed",
+          top: Math.min(position.y, window.innerHeight - 280),
+          left: Math.min(position.x, window.innerWidth - 220),
+          backgroundColor: "#0a0a15",
+          border: "1px solid #1a1a3a",
+          borderRadius: "10px",
+          padding: "8px",
+          minWidth: "200px",
+          boxShadow: "0 10px 40px rgba(0,0,0,0.8)",
+          zIndex: 1001,
+        }}
+      >
+        {view === "menu" && (
+          <>
+            <MItem
+              icon={<Reply size={14} />}
+              label="Reply"
+              onClick={() => {
+                onReply(message);
+                onClose();
+              }}
+            />
+            <MItem
+              icon={<Smile size={14} />}
+              label="React"
+              onClick={() => {
+                onReact(message);
+                onClose();
+              }}
+            />
+            <MItem
+              icon={<Copy size={14} />}
+              label="Copy"
+              onClick={() => {
+                navigator.clipboard.writeText(message.content);
+                onClose();
+              }}
+            />
+            {isOwn && (
+              <>
+                <div
+                  style={{
+                    height: "1px",
+                    background: "#1a1a3a",
+                    margin: "4px 0",
+                  }}
+                />
+                <MItem
+                  icon={<Pencil size={14} />}
+                  label="Edit"
+                  onClick={() => setView("edit")}
+                />
+                <MItem
+                  icon={<Trash2 size={14} />}
+                  label="Delete"
+                  danger
+                  onClick={() => setView("delete")}
+                />
+              </>
+            )}
+          </>
+        )}
+        {view === "edit" && (
+          <div style={{ padding: "8px" }}>
+            <textarea
+              value={editText}
+              onChange={(e) => setEditText(e.target.value)}
+              rows={3}
+              style={{
+                width: "100%",
+                padding: "10px",
+                backgroundColor: "#050508",
+                border: "1px solid #1a1a3a",
+                borderRadius: "6px",
+                color: "#fff",
+                fontSize: "13px",
+                outline: "none",
+                resize: "vertical",
+                boxSizing: "border-box",
+                fontFamily: "inherit",
+              }}
+            />
+            <div style={{ display: "flex", gap: "8px", marginTop: "8px" }}>
+              <button
+                onClick={() => {
+                  onEdit(message, editText.trim());
+                  onClose();
+                }}
+                style={{
+                  flex: 1,
+                  padding: "8px",
+                  border: "none",
+                  borderRadius: "6px",
+                  background: "linear-gradient(135deg, #4B0082, #9B30FF)",
+                  color: "white",
+                  fontSize: "11px",
+                  cursor: "pointer",
+                }}
+              >
+                SAVE
+              </button>
+              <button
+                onClick={onClose}
+                style={{
+                  flex: 1,
+                  padding: "8px",
+                  border: "1px solid #1a1a3a",
+                  borderRadius: "6px",
+                  backgroundColor: "transparent",
+                  color: "#4a4a6a",
+                  fontSize: "11px",
+                  cursor: "pointer",
+                }}
+              >
+                CANCEL
+              </button>
+            </div>
+          </div>
+        )}
+        {view === "delete" && (
+          <div style={{ padding: "8px" }}>
+            <div
+              style={{
+                color: "#ff4444",
+                fontSize: "12px",
+                fontWeight: "600",
+                marginBottom: "8px",
+              }}
+            >
+              DELETE?
+            </div>
+            <div style={{ display: "flex", gap: "8px" }}>
+              <button
+                onClick={() => {
+                  onDelete(message.id);
+                  onClose();
+                }}
+                style={{
+                  flex: 1,
+                  padding: "8px",
+                  border: "none",
+                  borderRadius: "6px",
+                  background: "#440000",
+                  color: "#ff4444",
+                  fontSize: "11px",
+                  cursor: "pointer",
+                }}
+              >
+                DELETE
+              </button>
+              <button
+                onClick={onClose}
+                style={{
+                  flex: 1,
+                  padding: "8px",
+                  border: "1px solid #1a1a3a",
+                  borderRadius: "6px",
+                  backgroundColor: "transparent",
+                  color: "#4a4a6a",
+                  fontSize: "11px",
+                  cursor: "pointer",
+                }}
+              >
+                CANCEL
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function MItem({ icon, label, onClick, danger }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "10px",
+        width: "100%",
+        padding: "8px 12px",
+        backgroundColor: "transparent",
+        border: "none",
+        borderRadius: "6px",
+        color: danger ? "#ff4444" : "#8a8aaa",
+        fontSize: "13px",
+        cursor: "pointer",
+        textAlign: "left",
+        transition: "all 0.15s",
+      }}
+      onMouseOver={(e) => {
+        e.currentTarget.style.backgroundColor = danger
+          ? "rgba(255,68,68,0.1)"
+          : "rgba(155,48,255,0.1)";
+        e.currentTarget.style.color = danger ? "#ff4444" : "#fff";
+      }}
+      onMouseOut={(e) => {
+        e.currentTarget.style.backgroundColor = "transparent";
+        e.currentTarget.style.color = danger ? "#ff4444" : "#8a8aaa";
+      }}
+    >
+      <span style={{ display: "flex", alignItems: "center" }}>{icon}</span>
+      <span>{label}</span>
+    </button>
+  );
+}
+
+function DMEmojiPicker({ onSelect, onClose }) {
+  const emojis = [
+    "👍",
+    "❤️",
+    "😂",
+    "😮",
+    "😢",
+    "😡",
+    "🔥",
+    "🎉",
+    "💯",
+    "👀",
+    "🚀",
+    "⚡",
+    "💀",
+    "🙏",
+    "💜",
+    "✅",
+    "❌",
+    "🤔",
+    "😎",
+    "🤯",
+    "💪",
+    "🫡",
+    "👑",
+    "⭐",
+  ];
+  return (
+    <div
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 2000,
+        backgroundColor: "rgba(0,0,0,0.6)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          backgroundColor: "#0a0a15",
+          border: "1px solid #1a1a3a",
+          borderRadius: "14px",
+          padding: "16px",
+          boxShadow: "0 20px 60px rgba(0,0,0,0.9)",
+        }}
+      >
+        <div
+          style={{
+            color: "#9B30FF",
+            fontSize: "11px",
+            fontWeight: "700",
+            letterSpacing: "3px",
+            marginBottom: "12px",
+            textAlign: "center",
+          }}
+        >
+          REACT
+        </div>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(8, 1fr)",
+            gap: "2px",
+          }}
+        >
+          {emojis.map((emoji, i) => (
+            <button
+              key={i}
+              onClick={() => {
+                onSelect(emoji);
+                onClose();
+              }}
+              style={{
+                width: "36px",
+                height: "36px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: "18px",
+                background: "transparent",
+                border: "none",
+                borderRadius: "6px",
+                cursor: "pointer",
+              }}
+              onMouseOver={(e) => {
+                e.currentTarget.style.backgroundColor = "rgba(155,48,255,0.2)";
+              }}
+              onMouseOut={(e) => {
+                e.currentTarget.style.backgroundColor = "transparent";
+              }}
+            >
+              {emoji}
+            </button>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
