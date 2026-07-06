@@ -22,6 +22,7 @@ import {
   Paperclip,
   Send,
 } from "lucide-react";
+import FileUploadPreview from "./FileUploadPreview";
 
 export default function Chat({ user }) {
   const [messages, setMessages] = useState([]);
@@ -45,6 +46,7 @@ export default function Chat({ user }) {
   const prevMessageCount = useRef(0);
   const messagesContainerRef = useRef(null);
   const username = user.user_metadata?.username || user.email;
+  const [pendingFile, setPendingFile] = useState(null);
 
   useEffect(() => {
     function checkMobile() {
@@ -306,36 +308,42 @@ export default function Chat({ user }) {
     input.type = "file";
     input.accept =
       "image/*,video/*,audio/*,.pdf,.txt,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.zip,.rar,.7z,.py,.js,.html,.css,.json,.xml,.md,.rtf";
-    input.onchange = async (e) => {
+    input.onchange = (e) => {
       const file = e.target.files[0];
-      if (!file || !activeRoom) return;
+      if (!file) return;
       if (file.size > 25 * 1024 * 1024) {
         alert("File too large. Maximum 25MB.");
         return;
       }
-      const ext = file.name.split(".").pop();
-      const uniqueName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${ext}`;
-      const { error: uploadError } = await supabase.storage
-        .from("attachments")
-        .upload(uniqueName, file);
-      if (uploadError) {
-        alert("Upload failed: " + uploadError.message);
-        return;
-      }
-      const { data: urlData } = supabase.storage
-        .from("attachments")
-        .getPublicUrl(uniqueName);
-      await supabase.from("messages").insert({
-        content: `📎 ${file.name}`,
-        username,
-        user_id: user.id,
-        room_id: activeRoom.id,
-        file_url: urlData.publicUrl,
-        file_name: file.name,
-        file_type: file.type,
-      });
+      setPendingFile(file);
     };
     input.click();
+  }
+
+  async function confirmFileUpload(file, caption) {
+    if (!file || !activeRoom) return;
+    setPendingFile(null);
+    const ext = file.name.split(".").pop();
+    const uniqueName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${ext}`;
+    const { error: uploadError } = await supabase.storage
+      .from("attachments")
+      .upload(uniqueName, file);
+    if (uploadError) {
+      alert("Upload failed: " + uploadError.message);
+      return;
+    }
+    const { data: urlData } = supabase.storage
+      .from("attachments")
+      .getPublicUrl(uniqueName);
+    await supabase.from("messages").insert({
+      content: caption || "",
+      username,
+      user_id: user.id,
+      room_id: activeRoom.id,
+      file_url: urlData.publicUrl,
+      file_name: file.name,
+      file_type: file.type,
+    });
   }
 
   function handleRightClick(e, room) {
@@ -1524,6 +1532,14 @@ export default function Chat({ user }) {
 
       {isMobile && (
         <MobileNav view={view} onNavigate={handleViewChange} notification={0} />
+      )}
+
+      {pendingFile && (
+        <FileUploadPreview
+          file={pendingFile}
+          onSend={confirmFileUpload}
+          onCancel={() => setPendingFile(null)}
+        />
       )}
 
       {contextMenu && (
