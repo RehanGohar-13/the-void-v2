@@ -18,6 +18,8 @@ import {
   UserX,
   Ban,
 } from "lucide-react";
+import FilePreview from "./FilePreview";
+import FileUploadPreview from "./FileUploadPreview";
 
 export default function DirectMessages({ currentUser }) {
   const [tab, setTab] = useState("friends");
@@ -35,6 +37,7 @@ export default function DirectMessages({ currentUser }) {
   const [showEmojiPicker, setShowEmojiPicker] = useState(null);
   const [reactions, setReactions] = useState({});
   const [typingUsers, setTypingUsers] = useState([]);
+  const [pendingFile, setPendingFile] = useState(null);
   const bottomRef = useRef(null);
   const prevMsgCount = useRef(0);
   const msgContainerRef = useRef(null);
@@ -99,10 +102,7 @@ export default function DirectMessages({ currentUser }) {
   }, [activeChat, currentUser.id]);
 
   useEffect(() => {
-    if (!messages.length) {
-      setReactions({});
-      return;
-    }
+    if (!messages.length) return;
     async function lr() {
       const ids = messages.map((m) => m.id);
       const { data } = await supabase
@@ -229,15 +229,13 @@ export default function DirectMessages({ currentUser }) {
     setSearchResult(data);
   }
   async function sendRequest(toUser) {
-    const { error } = await supabase
-      .from("friendships")
-      .insert({
-        from_user: currentUser.id,
-        to_user: toUser.id,
-        from_username: username,
-        to_username: toUser.username,
-        status: "pending",
-      });
+    const { error } = await supabase.from("friendships").insert({
+      from_user: currentUser.id,
+      to_user: toUser.id,
+      from_username: username,
+      to_username: toUser.username,
+      status: "pending",
+    });
     if (!error) {
       setSearchResult(null);
       setSearchQuery("");
@@ -294,14 +292,12 @@ export default function DirectMessages({ currentUser }) {
       activeChat.from_user === currentUser.id
         ? activeChat.to_user
         : activeChat.from_user;
-    await supabase
-      .from("typing")
-      .upsert({
-        user_id: currentUser.id,
-        username,
-        room_id: getRoomId(currentUser.id, fid),
-        typing_at: new Date().toISOString(),
-      });
+    await supabase.from("typing").upsert({
+      user_id: currentUser.id,
+      username,
+      room_id: getRoomId(currentUser.id, fid),
+      typing_at: new Date().toISOString(),
+    });
   }
   async function addDMReaction(mid, emoji) {
     const existing = (reactions[mid] || []).find(
@@ -318,43 +314,45 @@ export default function DirectMessages({ currentUser }) {
   async function handleDMFileUpload() {
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = "image/*,video/*,audio/*,.pdf,.txt,.doc,.docx,.zip,.rar";
-    input.onchange = async (e) => {
+    input.accept =
+      "image/*,video/*,audio/*,.pdf,.txt,.doc,.docx,.zip,.rar,.7z,.py,.js,.html,.css,.json,.xml,.md,.rtf";
+    input.onchange = (e) => {
       const file = e.target.files[0];
-      if (!file || !activeChat) return;
+      if (!file) return;
       if (file.size > 25 * 1024 * 1024) {
         alert("Max 25MB.");
         return;
       }
-      const ext = file.name.split(".").pop();
-      const un = `${Date.now()}_${Math.random().toString(36).substring(7)}.${ext}`;
-      const { error: ue } = await supabase.storage
-        .from("attachments")
-        .upload(un, file);
-      if (ue) {
-        alert("Upload failed.");
-        return;
-      }
-      const { data: ud } = supabase.storage
-        .from("attachments")
-        .getPublicUrl(un);
-      const fid =
-        activeChat.from_user === currentUser.id
-          ? activeChat.to_user
-          : activeChat.from_user;
-      await supabase
-        .from("direct_messages")
-        .insert({
-          content: `📎 ${file.name}`,
-          username,
-          user_id: currentUser.id,
-          room_id: getRoomId(currentUser.id, fid),
-          file_url: ud.publicUrl,
-          file_name: file.name,
-          file_type: file.type,
-        });
+      setPendingFile(file);
     };
     input.click();
+  }
+  async function confirmDMFileUpload(file, caption) {
+    if (!file || !activeChat) return;
+    setPendingFile(null);
+    const ext = file.name.split(".").pop();
+    const un = `${Date.now()}_${Math.random().toString(36).substring(7)}.${ext}`;
+    const { error: ue } = await supabase.storage
+      .from("attachments")
+      .upload(un, file);
+    if (ue) {
+      alert("Upload failed.");
+      return;
+    }
+    const { data: ud } = supabase.storage.from("attachments").getPublicUrl(un);
+    const fid =
+      activeChat.from_user === currentUser.id
+        ? activeChat.to_user
+        : activeChat.from_user;
+    await supabase.from("direct_messages").insert({
+      content: caption || "",
+      username,
+      user_id: currentUser.id,
+      room_id: getRoomId(currentUser.id, fid),
+      file_url: ud.publicUrl,
+      file_name: file.name,
+      file_type: file.type,
+    });
   }
   async function editDMMessage(msg, nc) {
     await supabase
@@ -488,6 +486,7 @@ export default function DirectMessages({ currentUser }) {
             const showName =
               i === 0 || messages[i - 1]?.user_id !== msg.user_id;
             const dd = getDateDivider(msg, messages[i - 1]);
+            const hasContent = msg.content && msg.content.trim() !== "";
             return (
               <div key={msg.id}>
                 {dd && (
@@ -583,57 +582,146 @@ export default function DirectMessages({ currentUser }) {
                       </div>
                     </div>
                   )}
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "flex-end",
-                      gap: "8px",
-                      flexDirection: isOwn ? "row-reverse" : "row",
-                    }}
-                  >
+
+                  {hasContent && !msg.file_url && (
                     <div
                       style={{
-                        maxWidth: isMobile ? "260px" : "460px",
-                        padding: "10px 16px",
-                        borderRadius: isOwn
-                          ? "16px 4px 16px 16px"
-                          : "4px 16px 16px 16px",
-                        background: isOwn
-                          ? "linear-gradient(135deg, #4B0082, #9B30FF)"
-                          : "#0a0a15",
-                        border: isOwn ? "none" : "1px solid #1a1a3a",
-                        color: "#ffffff",
-                        fontSize: isMobile ? "13px" : "14px",
-                        lineHeight: "1.5",
-                        wordBreak: "break-word",
-                        boxShadow: isOwn
-                          ? "0 4px 20px rgba(155,48,255,0.2)"
-                          : "none",
+                        display: "flex",
+                        alignItems: "flex-end",
+                        gap: "8px",
+                        flexDirection: isOwn ? "row-reverse" : "row",
                       }}
                     >
-                      {msg.content}
-                      {msg.edited && (
-                        <span
-                          style={{
-                            color: "#4a4a6a",
-                            fontSize: "10px",
-                            marginLeft: "8px",
-                          }}
-                        >
-                          (edited)
-                        </span>
-                      )}
+                      <div
+                        style={{
+                          maxWidth: isMobile ? "260px" : "460px",
+                          padding: "10px 16px",
+                          borderRadius: isOwn
+                            ? "16px 4px 16px 16px"
+                            : "4px 16px 16px 16px",
+                          background: isOwn
+                            ? "linear-gradient(135deg, #4B0082, #9B30FF)"
+                            : "#0a0a15",
+                          border: isOwn ? "none" : "1px solid #1a1a3a",
+                          color: "#ffffff",
+                          fontSize: isMobile ? "13px" : "14px",
+                          lineHeight: "1.5",
+                          wordBreak: "break-word",
+                          boxShadow: isOwn
+                            ? "0 4px 20px rgba(155,48,255,0.2)"
+                            : "none",
+                        }}
+                      >
+                        {msg.content}
+                        {msg.edited && (
+                          <span
+                            style={{
+                              color: "#4a4a6a",
+                              fontSize: "10px",
+                              marginLeft: "8px",
+                            }}
+                          >
+                            (edited)
+                          </span>
+                        )}
+                      </div>
+                      <div
+                        style={{
+                          color: "#2a2a3a",
+                          fontSize: "10px",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {formatTime(msg.created_at)}
+                      </div>
                     </div>
+                  )}
+
+                  {hasContent && msg.file_url && (
                     <div
                       style={{
-                        color: "#2a2a3a",
-                        fontSize: "10px",
-                        whiteSpace: "nowrap",
+                        display: "flex",
+                        alignItems: "flex-end",
+                        gap: "8px",
+                        flexDirection: isOwn ? "row-reverse" : "row",
+                        marginBottom: "4px",
                       }}
                     >
-                      {formatTime(msg.created_at)}
+                      <div
+                        style={{
+                          maxWidth: isMobile ? "260px" : "460px",
+                          padding: "10px 16px",
+                          borderRadius: isOwn
+                            ? "16px 4px 16px 16px"
+                            : "4px 16px 16px 16px",
+                          background: isOwn
+                            ? "linear-gradient(135deg, #4B0082, #9B30FF)"
+                            : "#0a0a15",
+                          border: isOwn ? "none" : "1px solid #1a1a3a",
+                          color: "#ffffff",
+                          fontSize: isMobile ? "13px" : "14px",
+                          lineHeight: "1.5",
+                          wordBreak: "break-word",
+                          boxShadow: isOwn
+                            ? "0 4px 20px rgba(155,48,255,0.2)"
+                            : "none",
+                        }}
+                      >
+                        {msg.content}
+                        {msg.edited && (
+                          <span
+                            style={{
+                              color: "#4a4a6a",
+                              fontSize: "10px",
+                              marginLeft: "8px",
+                            }}
+                          >
+                            (edited)
+                          </span>
+                        )}
+                      </div>
+                      <div
+                        style={{
+                          color: "#2a2a3a",
+                          fontSize: "10px",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {formatTime(msg.created_at)}
+                      </div>
                     </div>
-                  </div>
+                  )}
+
+                  {!hasContent && msg.file_url && (
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "flex-end",
+                        gap: "8px",
+                        flexDirection: isOwn ? "row-reverse" : "row",
+                      }}
+                    >
+                      <div
+                        style={{
+                          color: "#2a2a3a",
+                          fontSize: "10px",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {formatTime(msg.created_at)}
+                      </div>
+                    </div>
+                  )}
+
+                  {msg.file_url && (
+                    <FilePreview
+                      url={msg.file_url}
+                      name={msg.file_name}
+                      type={msg.file_type}
+                      isMobile={isMobile}
+                    />
+                  )}
+
                   {reactions[msg.id] && reactions[msg.id].length > 0 && (
                     <div
                       style={{
@@ -670,48 +758,6 @@ export default function DirectMessages({ currentUser }) {
                           </span>
                         </button>
                       ))}
-                    </div>
-                  )}
-                  {msg.file_url && (
-                    <div
-                      style={{
-                        marginTop: "6px",
-                        maxWidth: isMobile ? "260px" : "460px",
-                      }}
-                    >
-                      {msg.file_type?.startsWith("image/") ? (
-                        <img
-                          src={msg.file_url}
-                          alt={msg.file_name}
-                          style={{
-                            maxWidth: "100%",
-                            maxHeight: "300px",
-                            borderRadius: "8px",
-                            border: "1px solid #1a1a3a",
-                            cursor: "pointer",
-                          }}
-                          onClick={() => window.open(msg.file_url, "_blank")}
-                        />
-                      ) : (
-                        <a
-                          href={msg.file_url}
-                          download={msg.file_name}
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "8px",
-                            padding: "10px 16px",
-                            backgroundColor: "#0a0a15",
-                            border: "1px solid #1a1a3a",
-                            borderRadius: "8px",
-                            color: "#9B30FF",
-                            fontSize: "13px",
-                            textDecoration: "none",
-                          }}
-                        >
-                          <Paperclip size={14} /> {msg.file_name}
-                        </a>
-                      )}
                     </div>
                   )}
                 </div>
@@ -874,6 +920,13 @@ export default function DirectMessages({ currentUser }) {
               setShowEmojiPicker(null);
             }}
             onClose={() => setShowEmojiPicker(null)}
+          />
+        )}
+        {pendingFile && (
+          <FileUploadPreview
+            file={pendingFile}
+            onSend={confirmDMFileUpload}
+            onCancel={() => setPendingFile(null)}
           />
         )}
       </div>
