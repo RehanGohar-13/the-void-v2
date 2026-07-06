@@ -11,6 +11,7 @@ import OnlinePanel from "./OnlinePanel";
 import MobileSettings from "./MobileSettings";
 import SettingsPage from "./SettingsPage";
 import EmojiPicker from "./EmojiPicker";
+import FilePreview from "./FilePreview";
 import {
   Settings,
   LogOut,
@@ -40,7 +41,6 @@ export default function Chat({ user }) {
   const [showEmojiPicker, setShowEmojiPicker] = useState(null);
   const [reactions, setReactions] = useState({});
   const [isMobile, setIsMobile] = useState(false);
-
   const bottomRef = useRef(null);
   const prevMessageCount = useRef(0);
   const messagesContainerRef = useRef(null);
@@ -65,12 +65,10 @@ export default function Chat({ user }) {
       .select("*")
       .or(`created_by.eq.${user.id},created_by.is.null,is_private.eq.false`)
       .order("created_at", { ascending: true });
-
     const { data: memberRooms } = await supabase
       .from("channel_members")
       .select("room_id")
       .eq("user_id", user.id);
-
     let allRooms = data || [];
     if (memberRooms && memberRooms.length > 0) {
       const ids = memberRooms.map((m) => m.room_id);
@@ -86,7 +84,6 @@ export default function Chat({ user }) {
       }
     }
     allRooms.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-
     if (allRooms.length > 0) {
       setRooms(allRooms);
       setActiveRoom((prev) => {
@@ -165,26 +162,25 @@ export default function Chat({ user }) {
   }, [activeRoom, view]);
 
   useEffect(() => {
-    loadReactions();
-  }, [messages]);
-
-  async function loadReactions() {
     if (!messages.length) {
       setReactions({});
       return;
     }
-    const ids = messages.map((m) => m.id);
-    const { data } = await supabase
-      .from("reactions")
-      .select("*")
-      .in("message_id", ids);
-    const grouped = {};
-    (data || []).forEach((r) => {
-      if (!grouped[r.message_id]) grouped[r.message_id] = [];
-      grouped[r.message_id].push(r);
-    });
-    setReactions(grouped);
-  }
+    async function lr() {
+      const ids = messages.map((m) => m.id);
+      const { data } = await supabase
+        .from("reactions")
+        .select("*")
+        .in("message_id", ids);
+      const grouped = {};
+      (data || []).forEach((r) => {
+        if (!grouped[r.message_id]) grouped[r.message_id] = [];
+        grouped[r.message_id].push(r);
+      });
+      setReactions(grouped);
+    }
+    lr();
+  }, [messages]);
 
   useEffect(() => {
     let interval;
@@ -235,7 +231,6 @@ export default function Chat({ user }) {
   function handleViewChange(v) {
     if (v !== view) setView(v);
   }
-
   function switchRoom(room) {
     setActiveRoom(room);
     setMessages([]);
@@ -304,7 +299,6 @@ export default function Chat({ user }) {
         .from("reactions")
         .insert({ message_id: messageId, user_id: user.id, username, emoji });
     }
-    await loadReactions();
   }
 
   async function handleFileUpload() {
@@ -352,7 +346,6 @@ export default function Chat({ user }) {
       y: Math.min(e.clientY, window.innerHeight - 320),
     });
   }
-
   function handleMessageRightClick(e, msg) {
     e.preventDefault();
     setMessageMenu({
@@ -385,13 +378,11 @@ export default function Chat({ user }) {
     const d = new Date(ts);
     return `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
   }
-
   function getDateDivider(msg, prev) {
     const d = new Date(msg.created_at).toLocaleDateString();
     if (!prev) return d;
     return d !== new Date(prev.created_at).toLocaleDateString() ? d : null;
   }
-
   function groupReactionData(msgId) {
     return Object.entries(
       (reactions[msgId] || []).reduce((acc, r) => {
@@ -419,7 +410,6 @@ export default function Chat({ user }) {
         left: 0,
       }}
     >
-      {/* ══ DESKTOP SIDEBAR ══ */}
       {!isMobile && (
         <div
           style={{
@@ -827,7 +817,6 @@ export default function Chat({ user }) {
         </div>
       )}
 
-      {/* ══ MOBILE HEADER ══ */}
       {isMobile && (
         <div style={{ flexShrink: 0, width: "100%" }}>
           <div
@@ -874,7 +863,6 @@ export default function Chat({ user }) {
               </span>
             </div>
           </div>
-
           {view === "chat" && (
             <div
               style={{
@@ -958,7 +946,6 @@ export default function Chat({ user }) {
               </button>
             </div>
           )}
-
           {view === "chat" && showNewRoom && (
             <div
               style={{
@@ -1042,7 +1029,6 @@ export default function Chat({ user }) {
         </div>
       )}
 
-      {/* ══ MAIN CONTENT ══ */}
       {view === "chat" ? (
         <div
           style={{
@@ -1364,46 +1350,12 @@ export default function Chat({ user }) {
                     )}
 
                     {msg.file_url && (
-                      <div
-                        style={{
-                          marginTop: "6px",
-                          maxWidth: isMobile ? "260px" : "460px",
-                        }}
-                      >
-                        {msg.file_type?.startsWith("image/") ? (
-                          <img
-                            src={msg.file_url}
-                            alt={msg.file_name}
-                            style={{
-                              maxWidth: "100%",
-                              maxHeight: "300px",
-                              borderRadius: "8px",
-                              border: "1px solid #1a1a3a",
-                              cursor: "pointer",
-                            }}
-                            onClick={() => window.open(msg.file_url, "_blank")}
-                          />
-                        ) : (
-                          <a
-                            href={msg.file_url}
-                            download={msg.file_name}
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: "8px",
-                              padding: "10px 16px",
-                              backgroundColor: "#0a0a15",
-                              border: "1px solid #1a1a3a",
-                              borderRadius: "8px",
-                              color: "#9B30FF",
-                              fontSize: "13px",
-                              textDecoration: "none",
-                            }}
-                          >
-                            <Paperclip size={14} /> {msg.file_name}
-                          </a>
-                        )}
-                      </div>
+                      <FilePreview
+                        url={msg.file_url}
+                        name={msg.file_name}
+                        type={msg.file_type}
+                        isMobile={isMobile}
+                      />
                     )}
                   </div>
                 </div>
