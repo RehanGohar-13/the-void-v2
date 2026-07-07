@@ -12,6 +12,9 @@ import MobileSettings from "./MobileSettings";
 import SettingsPage from "./SettingsPage";
 import EmojiPicker from "./EmojiPicker";
 import FilePreview from "./FilePreview";
+import FileUploadPreview from "./FileUploadPreview";
+import MessageBubble from "./MessageBubble";
+import DateDivider from "./DateDivider";
 import {
   Settings,
   LogOut,
@@ -22,7 +25,6 @@ import {
   Paperclip,
   Send,
 } from "lucide-react";
-import FileUploadPreview from "./FileUploadPreview";
 
 export default function Chat({ user }) {
   const [messages, setMessages] = useState([]);
@@ -42,11 +44,11 @@ export default function Chat({ user }) {
   const [showEmojiPicker, setShowEmojiPicker] = useState(null);
   const [reactions, setReactions] = useState({});
   const [isMobile, setIsMobile] = useState(false);
+  const [pendingFile, setPendingFile] = useState(null);
   const bottomRef = useRef(null);
   const prevMessageCount = useRef(0);
   const messagesContainerRef = useRef(null);
   const username = user.user_metadata?.username || user.email;
-  const [pendingFile, setPendingFile] = useState(null);
 
   useEffect(() => {
     function checkMobile() {
@@ -444,7 +446,6 @@ export default function Chat({ user }) {
                 "linear-gradient(90deg, transparent, #9B30FF, #00BFFF, transparent)",
             }}
           />
-
           <div style={{ marginBottom: "30px" }}>
             <div
               style={{
@@ -1159,217 +1160,18 @@ export default function Chat({ user }) {
               const dd = getDateDivider(msg, messages[i - 1]);
               return (
                 <div key={msg.id}>
-                  {dd && (
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "12px",
-                        margin: "20px 0 12px",
-                      }}
-                    >
-                      <div
-                        style={{
-                          flex: 1,
-                          height: "1px",
-                          background: "#1a1a3a",
-                        }}
-                      />
-                      <div
-                        style={{
-                          color: "#2a2a3a",
-                          fontSize: "11px",
-                          letterSpacing: "2px",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {dd}
-                      </div>
-                      <div
-                        style={{
-                          flex: 1,
-                          height: "1px",
-                          background: "#1a1a3a",
-                        }}
-                      />
-                    </div>
-                  )}
-
-                  <div
+                  <DateDivider date={dd} />
+                  <MessageBubble
+                    msg={msg}
+                    isOwn={isOwn}
+                    showName={showName}
+                    isMobile={isMobile}
+                    reactions={reactions[msg.id] || []}
+                    onReaction={addReaction}
                     onContextMenu={(e) => handleMessageRightClick(e, msg)}
-                    onTouchStart={(e) => {
-                      const t = setTimeout(() => {
-                        handleMessageRightClick(
-                          {
-                            preventDefault: () => {},
-                            clientX: e.touches[0].clientX,
-                            clientY: e.touches[0].clientY,
-                          },
-                          msg,
-                        );
-                      }, 500);
-                      e.currentTarget.dataset.longpress = t;
-                    }}
-                    onTouchEnd={(e) =>
-                      clearTimeout(Number(e.currentTarget.dataset.longpress))
-                    }
-                    onTouchMove={(e) =>
-                      clearTimeout(Number(e.currentTarget.dataset.longpress))
-                    }
-                    style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      alignItems: isOwn ? "flex-end" : "flex-start",
-                      marginTop: showName ? "16px" : "2px",
-                    }}
-                  >
-                    {showName && (
-                      <div
-                        style={{
-                          color: isOwn ? "#9B30FF" : "#00BFFF",
-                          fontSize: "11px",
-                          letterSpacing: "1px",
-                          marginBottom: "4px",
-                        }}
-                      >
-                        {isOwn ? "YOU" : msg.username}
-                      </div>
-                    )}
-
-                    {msg.reply_to_content && (
-                      <div
-                        style={{
-                          padding: "6px 12px",
-                          marginBottom: "4px",
-                          borderLeft: "3px solid #4B0082",
-                          backgroundColor: "rgba(75,0,130,0.1)",
-                          borderRadius: "0 6px 6px 0",
-                          maxWidth: isMobile ? "250px" : "300px",
-                        }}
-                      >
-                        <div style={{ color: "#9B30FF", fontSize: "10px" }}>
-                          {msg.reply_to_username}
-                        </div>
-                        <div
-                          style={{
-                            color: "#4a4a6a",
-                            fontSize: "11px",
-                            overflow: "hidden",
-                            whiteSpace: "nowrap",
-                            textOverflow: "ellipsis",
-                          }}
-                        >
-                          {msg.reply_to_content}
-                        </div>
-                      </div>
-                    )}
-
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "flex-end",
-                        gap: "8px",
-                        flexDirection: isOwn ? "row-reverse" : "row",
-                      }}
-                    >
-                      {msg.content &&
-                        msg.content.trim() !== "" &&
-                        !(msg.file_url && !msg.content.trim()) && (
-                          <div
-                            style={{
-                              maxWidth: isMobile ? "260px" : "460px",
-                              padding: "10px 16px",
-                              borderRadius: isOwn
-                                ? "16px 4px 16px 16px"
-                                : "4px 16px 16px 16px",
-                              background: isOwn
-                                ? "linear-gradient(135deg, #4B0082, #9B30FF)"
-                                : "#0a0a15",
-                              border: isOwn ? "none" : "1px solid #1a1a3a",
-                              color: "#ffffff",
-                              fontSize: isMobile ? "13px" : "14px",
-                              lineHeight: "1.5",
-                              boxShadow: isOwn
-                                ? "0 4px 20px rgba(155,48,255,0.2)"
-                                : "none",
-                              wordBreak: "break-word",
-                            }}
-                          >
-                            {msg.file_url ? msg.content.trim() : msg.content}
-                            {msg.edited && (
-                              <span
-                                style={{
-                                  color: "#4a4a6a",
-                                  fontSize: "10px",
-                                  marginLeft: "8px",
-                                }}
-                              >
-                                (edited)
-                              </span>
-                            )}
-                          </div>
-                        )}
-                      <div
-                        style={{
-                          color: "#2a2a3a",
-                          fontSize: "10px",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {formatTime(msg.created_at)}
-                      </div>
-                    </div>
-
-                    {reactions[msg.id] && reactions[msg.id].length > 0 && (
-                      <div
-                        style={{
-                          display: "flex",
-                          gap: "4px",
-                          marginTop: "4px",
-                          flexWrap: "wrap",
-                        }}
-                      >
-                        {groupReactionData(msg.id).map(([emoji, data]) => (
-                          <button
-                            key={emoji}
-                            onClick={() => addReaction(msg.id, emoji)}
-                            title={data.users.join(", ")}
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: "4px",
-                              padding: "2px 8px",
-                              borderRadius: "12px",
-                              fontSize: "13px",
-                              cursor: "pointer",
-                              border: "1px solid",
-                              borderColor: data.hasOwn ? "#9B30FF" : "#1a1a3a",
-                              backgroundColor: data.hasOwn
-                                ? "rgba(155,48,255,0.15)"
-                                : "rgba(255,255,255,0.03)",
-                              color: "#ffffff",
-                            }}
-                          >
-                            <span>{emoji}</span>
-                            <span
-                              style={{ fontSize: "11px", color: "#8a8aaa" }}
-                            >
-                              {data.count}
-                            </span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-
-                    {msg.file_url && (
-                      <FilePreview
-                        url={msg.file_url}
-                        name={msg.file_name}
-                        type={msg.file_type}
-                        isMobile={isMobile}
-                      />
-                    )}
-                  </div>
+                    formatTime={formatTime}
+                    groupReactionData={groupReactionData(msg.id)}
+                  />
                 </div>
               );
             })}
