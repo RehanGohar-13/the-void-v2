@@ -12,16 +12,21 @@ import {
   Paperclip,
   Send,
   ArrowLeft,
-  Search,
+  Search as SearchIcon,
   UserPlus,
   UserCheck,
   UserX,
   Ban,
+  Pin,
+  Search,
 } from "lucide-react";
 import FilePreview from "./FilePreview";
 import FileUploadPreview from "./FileUploadPreview";
 import MessageBubble from "./MessageBubble";
 import DateDivider from "./DateDivider";
+import SearchMessages from "./SearchMessages";
+import PinnedMessages from "./PinnedMessages";
+import EmojiPicker from "./EmojiPicker";
 
 export default function DirectMessages({ currentUser }) {
   const [tab, setTab] = useState("friends");
@@ -40,12 +45,20 @@ export default function DirectMessages({ currentUser }) {
   const [reactions, setReactions] = useState({});
   const [typingUsers, setTypingUsers] = useState([]);
   const [pendingFile, setPendingFile] = useState(null);
+
+  // ── Sprint 5 new states ──────────────────────────────
+  const [showDMSearch, setShowDMSearch] = useState(false);
+  const [showDMPinned, setShowDMPinned] = useState(false);
+  const [dmUnreadCounts, setDmUnreadCounts] = useState({});
+  // ────────────────────────────────────────────────────
+
   const bottomRef = useRef(null);
   const prevMsgCount = useRef(0);
   const msgContainerRef = useRef(null);
   const username = currentUser.user_metadata?.username || currentUser.email;
   const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
 
+  // ── Load friends & requests ──────────────────────────
   useEffect(() => {
     let mounted = true;
     let interval;
@@ -75,6 +88,7 @@ export default function DirectMessages({ currentUser }) {
     };
   }, [currentUser.id, activeChat]);
 
+  // ── Load DM messages ─────────────────────────────────
   useEffect(() => {
     let mounted = true;
     let interval;
@@ -103,6 +117,7 @@ export default function DirectMessages({ currentUser }) {
     };
   }, [activeChat, currentUser.id]);
 
+  // ── Load reactions ───────────────────────────────────
   useEffect(() => {
     if (!messages.length) return;
     async function lr() {
@@ -121,6 +136,7 @@ export default function DirectMessages({ currentUser }) {
     lr();
   }, [messages]);
 
+  // ── Typing indicator ─────────────────────────────────
   useEffect(() => {
     let interval;
     let mounted = true;
@@ -150,6 +166,7 @@ export default function DirectMessages({ currentUser }) {
     };
   }, [activeChat, currentUser.id]);
 
+  // ── Auto scroll ──────────────────────────────────────
   useEffect(() => {
     const c = msgContainerRef.current;
     if (!c) return;
@@ -170,6 +187,65 @@ export default function DirectMessages({ currentUser }) {
     prevMsgCount.current = messages.length;
   }, [messages]);
 
+  // ── Sprint 5: Unread counts ──────────────────────────
+  useEffect(() => {
+    if (activeChat) return; // Don't track when inside a chat
+    async function loadUnread() {
+      if (!friends.length) return;
+      const counts = {};
+      for (const f of friends) {
+        const fid = f.from_user === currentUser.id ? f.to_user : f.from_user;
+        const rid = getRoomId(currentUser.id, fid);
+
+        // Get last read time for this DM room
+        const { data: lr } = await supabase
+          .from("last_read")
+          .select("read_at")
+          .eq("user_id", currentUser.id)
+          .eq("room_id", rid)
+          .single();
+
+        // Count messages after last read
+        let query = supabase
+          .from("direct_messages")
+          .select("id", { count: "exact" })
+          .eq("room_id", rid)
+          .neq("user_id", currentUser.id);
+
+        if (lr?.read_at) {
+          query = query.gt("created_at", lr.read_at);
+        }
+
+        const { count } = await query;
+        if (count > 0) counts[f.id] = count;
+      }
+      setDmUnreadCounts(counts);
+    }
+    loadUnread();
+  }, [friends, activeChat, currentUser.id]);
+
+  // ── Sprint 5: Mark as read when opening DM ──────────
+  useEffect(() => {
+    if (!activeChat) return;
+    const fid =
+      activeChat.from_user === currentUser.id
+        ? activeChat.to_user
+        : activeChat.from_user;
+    const rid = getRoomId(currentUser.id, fid);
+    supabase.from("last_read").upsert({
+      user_id: currentUser.id,
+      room_id: rid,
+      read_at: new Date().toISOString(),
+    });
+    // Clear badge immediately
+    setDmUnreadCounts((prev) => {
+      const next = { ...prev };
+      delete next[activeChat.id];
+      return next;
+    });
+  }, [activeChat, currentUser.id]);
+
+  // ── Helpers ──────────────────────────────────────────
   function getRoomId(a, b) {
     return [a, b].sort().join("_");
   }
@@ -178,7 +254,10 @@ export default function DirectMessages({ currentUser }) {
   }
   function formatTime(ts) {
     const d = new Date(ts);
-    return `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
+    return `${d.getHours().toString().padStart(2, "0")}:${d
+      .getMinutes()
+      .toString()
+      .padStart(2, "0")}`;
   }
   function getDateDivider(msg, prev) {
     const d = new Date(msg.created_at).toLocaleDateString();
@@ -197,6 +276,7 @@ export default function DirectMessages({ currentUser }) {
     );
   }
 
+  // ── Friend / request actions ─────────────────────────
   async function searchUser() {
     setSearchError("");
     setSearchResult(null);
@@ -263,6 +343,7 @@ export default function DirectMessages({ currentUser }) {
       .eq("id", id);
   }
 
+  // ── Message actions ──────────────────────────────────
   async function sendDM(e) {
     e.preventDefault();
     const content = text.trim();
@@ -365,6 +446,19 @@ export default function DirectMessages({ currentUser }) {
   async function deleteDMMessage(id) {
     await supabase.from("direct_messages").delete().eq("id", id);
   }
+
+  // ── Sprint 5: Pin action ─────────────────────────────
+  async function pinDMMessage(msg) {
+    const isPinned = msg.pinned;
+    await supabase
+      .from("direct_messages")
+      .update({
+        pinned: !isPinned,
+        pinned_by: !isPinned ? username : null,
+      })
+      .eq("id", msg.id);
+  }
+
   function handleDMMessageMenu(e, msg) {
     if (e.preventDefault) e.preventDefault();
     if (e.stopPropagation) e.stopPropagation();
@@ -375,8 +469,15 @@ export default function DirectMessages({ currentUser }) {
     });
   }
 
+  // ── Active DM chat view ──────────────────────────────
   if (activeChat) {
     const fn = getFriendName(activeChat);
+    const fid =
+      activeChat.from_user === currentUser.id
+        ? activeChat.to_user
+        : activeChat.from_user;
+    const rid = getRoomId(currentUser.id, fid);
+
     return (
       <div
         style={{
@@ -388,6 +489,7 @@ export default function DirectMessages({ currentUser }) {
           overflow: "hidden",
         }}
       >
+        {/* ── Header ── */}
         <div
           style={{
             padding: isMobile ? "12px 16px" : "20px 30px",
@@ -403,6 +505,8 @@ export default function DirectMessages({ currentUser }) {
             onClick={() => {
               setActiveChat(null);
               setMessages([]);
+              setShowDMSearch(false);
+              setShowDMPinned(false);
               prevMsgCount.current = 0;
             }}
             style={{
@@ -420,6 +524,7 @@ export default function DirectMessages({ currentUser }) {
           >
             <ArrowLeft size={14} /> BACK
           </button>
+
           <div
             style={{
               width: "36px",
@@ -436,7 +541,8 @@ export default function DirectMessages({ currentUser }) {
           >
             {fn.charAt(0).toUpperCase()}
           </div>
-          <div>
+
+          <div style={{ flex: 1 }}>
             <div
               style={{
                 color: "#ffffff",
@@ -457,8 +563,97 @@ export default function DirectMessages({ currentUser }) {
               PRIVATE TRANSMISSION
             </div>
           </div>
+
+          {/* ── Sprint 5: Search & Pin buttons ── */}
+          <div style={{ display: "flex", gap: "8px" }}>
+            <button
+              onClick={() => {
+                setShowDMSearch((prev) => !prev);
+                setShowDMPinned(false);
+              }}
+              title="Search Messages"
+              style={{
+                background: showDMSearch
+                  ? "rgba(155,48,255,0.15)"
+                  : "transparent",
+                border: "1px solid",
+                borderColor: showDMSearch ? "#9B30FF" : "#1a1a3a",
+                borderRadius: "6px",
+                color: showDMSearch ? "#9B30FF" : "#4a4a6a",
+                padding: "6px 10px",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                transition: "all 0.2s",
+              }}
+            >
+              <SearchIcon size={15} />
+            </button>
+            <button
+              onClick={() => {
+                setShowDMPinned((prev) => !prev);
+                setShowDMSearch(false);
+              }}
+              title="Pinned Messages"
+              style={{
+                background: showDMPinned
+                  ? "rgba(155,48,255,0.15)"
+                  : "transparent",
+                border: "1px solid",
+                borderColor: showDMPinned ? "#9B30FF" : "#1a1a3a",
+                borderRadius: "6px",
+                color: showDMPinned ? "#9B30FF" : "#4a4a6a",
+                padding: "6px 10px",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                transition: "all 0.2s",
+              }}
+            >
+              <Pin size={15} />
+            </button>
+          </div>
         </div>
 
+        {/* ── Sprint 5: Search Panel ── */}
+        <AnimatePresence>
+          {showDMSearch && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              style={{ overflow: "hidden", flexShrink: 0 }}
+            >
+              <SearchMessages
+                roomId={rid}
+                tableName="direct_messages"
+                onClose={() => setShowDMSearch(false)}
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* ── Sprint 5: Pinned Panel ── */}
+        <AnimatePresence>
+          {showDMPinned && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              style={{ overflow: "hidden", flexShrink: 0 }}
+            >
+              <PinnedMessages
+                roomId={rid}
+                tableName="direct_messages"
+                currentUser={currentUser}
+                onClose={() => setShowDMPinned(false)}
+                onUnpin={pinDMMessage}
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* ── Messages ── */}
         <div
           ref={msgContainerRef}
           style={{
@@ -508,6 +703,7 @@ export default function DirectMessages({ currentUser }) {
           <div ref={bottomRef} />
         </div>
 
+        {/* ── Typing indicator ── */}
         {typingUsers.length > 0 && (
           <div
             style={{
@@ -522,6 +718,7 @@ export default function DirectMessages({ currentUser }) {
           </div>
         )}
 
+        {/* ── Reply bar ── */}
         {replyTo && (
           <div
             style={{
@@ -566,6 +763,7 @@ export default function DirectMessages({ currentUser }) {
           </div>
         )}
 
+        {/* ── Input bar ── */}
         <div
           style={{
             padding: isMobile ? "10px 12px" : "20px 30px",
@@ -642,6 +840,7 @@ export default function DirectMessages({ currentUser }) {
           </form>
         </div>
 
+        {/* ── Menus & Pickers ── */}
         {messageMenu && (
           <DMMessageMenu
             message={messageMenu.message}
@@ -652,10 +851,11 @@ export default function DirectMessages({ currentUser }) {
             onReact={(msg) => setShowEmojiPicker(msg)}
             onEdit={editDMMessage}
             onDelete={deleteDMMessage}
+            onPin={pinDMMessage}
           />
         )}
         {showEmojiPicker && (
-          <DMEmojiPicker
+          <EmojiPicker
             onSelect={(emoji) => {
               addDMReaction(showEmojiPicker.id, emoji);
               setShowEmojiPicker(null);
@@ -674,6 +874,7 @@ export default function DirectMessages({ currentUser }) {
     );
   }
 
+  // ── Friends list view ────────────────────────────────
   return (
     <div
       style={{
@@ -709,6 +910,7 @@ export default function DirectMessages({ currentUser }) {
         }}
       />
 
+      {/* ── Tabs ── */}
       <div style={{ display: "flex", gap: "4px", marginBottom: "24px" }}>
         {[
           { key: "friends", label: "FRIENDS" },
@@ -716,7 +918,7 @@ export default function DirectMessages({ currentUser }) {
             key: "requests",
             label: `REQUESTS${notification > 0 ? ` (${notification})` : ""}`,
           },
-          { key: "search", label: "SEARCH" },
+          { key: "search", label: "ADD FRIEND" },
         ].map((t) => (
           <button
             key={t.key}
@@ -740,6 +942,7 @@ export default function DirectMessages({ currentUser }) {
       </div>
 
       <AnimatePresence mode="wait">
+        {/* ── Friends tab ── */}
         {tab === "friends" && (
           <motion.div
             key="friends"
@@ -779,24 +982,52 @@ export default function DirectMessages({ currentUser }) {
                   borderRadius: "10px",
                   cursor: "pointer",
                   textAlign: "left",
+                  position: "relative", // needed for badge
                 }}
               >
-                <div
-                  style={{
-                    width: "40px",
-                    height: "40px",
-                    borderRadius: "50%",
-                    background: "linear-gradient(135deg, #4B0082, #00BFFF)",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    color: "white",
-                    fontSize: "16px",
-                    fontWeight: "700",
-                  }}
-                >
-                  {getFriendName(f).charAt(0).toUpperCase()}
+                {/* Avatar */}
+                <div style={{ position: "relative" }}>
+                  <div
+                    style={{
+                      width: "40px",
+                      height: "40px",
+                      borderRadius: "50%",
+                      background: "linear-gradient(135deg, #4B0082, #00BFFF)",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      color: "white",
+                      fontSize: "16px",
+                      fontWeight: "700",
+                    }}
+                  >
+                    {getFriendName(f).charAt(0).toUpperCase()}
+                  </div>
+                  {/* ── Sprint 5: Unread badge ── */}
+                  {dmUnreadCounts[f.id] > 0 && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        top: "-4px",
+                        right: "-4px",
+                        backgroundColor: "#ff4444",
+                        color: "white",
+                        borderRadius: "50%",
+                        width: "18px",
+                        height: "18px",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: "10px",
+                        fontWeight: "700",
+                        border: "2px solid #000000",
+                      }}
+                    >
+                      {dmUnreadCounts[f.id] > 9 ? "9+" : dmUnreadCounts[f.id]}
+                    </div>
+                  )}
                 </div>
+
                 <div style={{ flex: 1 }}>
                   <div
                     style={{
@@ -808,7 +1039,9 @@ export default function DirectMessages({ currentUser }) {
                     {getFriendName(f)}
                   </div>
                   <div style={{ color: "#2a2a3a", fontSize: "11px" }}>
-                    Click to open DM
+                    {dmUnreadCounts[f.id] > 0
+                      ? `${dmUnreadCounts[f.id]} new message${dmUnreadCounts[f.id] > 1 ? "s" : ""}`
+                      : "Click to open DM"}
                   </div>
                 </div>
               </button>
@@ -816,6 +1049,7 @@ export default function DirectMessages({ currentUser }) {
           </motion.div>
         )}
 
+        {/* ── Requests tab ── */}
         {tab === "requests" && (
           <motion.div
             key="requests"
@@ -938,6 +1172,7 @@ export default function DirectMessages({ currentUser }) {
           </motion.div>
         )}
 
+        {/* ── Search / Add Friend tab ── */}
         {tab === "search" && (
           <motion.div
             key="search"
@@ -1006,7 +1241,11 @@ export default function DirectMessages({ currentUser }) {
                   backgroundColor: searchError.includes("sent")
                     ? "rgba(0,255,0,0.05)"
                     : "rgba(255,68,68,0.05)",
-                  border: `1px solid ${searchError.includes("sent") ? "rgba(0,255,0,0.2)" : "rgba(255,68,68,0.2)"}`,
+                  border: `1px solid ${
+                    searchError.includes("sent")
+                      ? "rgba(0,255,0,0.2)"
+                      : "rgba(255,68,68,0.2)"
+                  }`,
                 }}
               >
                 {searchError}
@@ -1083,6 +1322,7 @@ export default function DirectMessages({ currentUser }) {
   );
 }
 
+// ── DMMessageMenu (with Pin added) ───────────────────────
 function DMMessageMenu({
   message,
   isOwn,
@@ -1092,9 +1332,12 @@ function DMMessageMenu({
   onReact,
   onEdit,
   onDelete,
+  onPin,
 }) {
   const [view, setView] = useState("menu");
   const [editText, setEditText] = useState(message.content);
+  const isPinned = message.pinned;
+
   return (
     <div
       onClick={(e) => {
@@ -1110,7 +1353,7 @@ function DMMessageMenu({
       <div
         style={{
           position: "fixed",
-          top: Math.min(position.y, window.innerHeight - 280),
+          top: Math.min(position.y, window.innerHeight - 320),
           left: Math.min(position.x, window.innerWidth - 220),
           backgroundColor: "#0a0a15",
           border: "1px solid #1a1a3a",
@@ -1144,6 +1387,15 @@ function DMMessageMenu({
               label="Copy"
               onClick={() => {
                 navigator.clipboard.writeText(message.content);
+                onClose();
+              }}
+            />
+            {/* ── Sprint 5: Pin option ── */}
+            <MItem
+              icon={<Pin size={14} />}
+              label={isPinned ? "Unpin Message" : "Pin Message"}
+              onClick={() => {
+                onPin(message);
                 onClose();
               }}
             />
@@ -1282,6 +1534,7 @@ function DMMessageMenu({
   );
 }
 
+// ── MItem helper (unchanged) ─────────────────────────────
 function MItem({ icon, label, onClick, danger }) {
   return (
     <button
@@ -1315,111 +1568,5 @@ function MItem({ icon, label, onClick, danger }) {
       <span style={{ display: "flex", alignItems: "center" }}>{icon}</span>
       <span>{label}</span>
     </button>
-  );
-}
-
-function DMEmojiPicker({ onSelect, onClose }) {
-  const emojis = [
-    "👍",
-    "❤️",
-    "😂",
-    "😮",
-    "😢",
-    "😡",
-    "🔥",
-    "🎉",
-    "💯",
-    "👀",
-    "🚀",
-    "⚡",
-    "💀",
-    "🙏",
-    "💜",
-    "✅",
-    "❌",
-    "🤔",
-    "😎",
-    "🤯",
-    "💪",
-    "🫡",
-    "👑",
-    "⭐",
-  ];
-  return (
-    <div
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 2000,
-        backgroundColor: "rgba(0,0,0,0.6)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          backgroundColor: "#0a0a15",
-          border: "1px solid #1a1a3a",
-          borderRadius: "14px",
-          padding: "16px",
-          boxShadow: "0 20px 60px rgba(0,0,0,0.9)",
-        }}
-      >
-        <div
-          style={{
-            color: "#9B30FF",
-            fontSize: "11px",
-            fontWeight: "700",
-            letterSpacing: "3px",
-            marginBottom: "12px",
-            textAlign: "center",
-          }}
-        >
-          REACT
-        </div>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(8, 1fr)",
-            gap: "2px",
-          }}
-        >
-          {emojis.map((emoji, i) => (
-            <button
-              key={i}
-              onClick={() => {
-                onSelect(emoji);
-                onClose();
-              }}
-              style={{
-                width: "36px",
-                height: "36px",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: "18px",
-                background: "transparent",
-                border: "none",
-                borderRadius: "6px",
-                cursor: "pointer",
-              }}
-              onMouseOver={(e) => {
-                e.currentTarget.style.backgroundColor = "rgba(155,48,255,0.2)";
-              }}
-              onMouseOut={(e) => {
-                e.currentTarget.style.backgroundColor = "transparent";
-              }}
-            >
-              {emoji}
-            </button>
-          ))}
-        </div>
-      </div>
-    </div>
   );
 }

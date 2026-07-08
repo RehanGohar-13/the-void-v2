@@ -4,14 +4,20 @@ import { useState, useEffect } from "react";
 import { supabase } from "../lib/supabaseClient";
 import { X, Pin } from "lucide-react";
 
-export default function PinnedMessages({ roomId, onClose }) {
+// tableName defaults to "messages" so Chat.jsx works with zero changes
+export default function PinnedMessages({
+  roomId,
+  onClose,
+  tableName = "messages",
+  currentUser,
+}) {
   const [pinned, setPinned] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function load() {
       const { data } = await supabase
-        .from("messages")
+        .from(tableName) // ← now works for both "messages" and "direct_messages"
         .select("*")
         .eq("room_id", roomId)
         .eq("pinned", true)
@@ -20,11 +26,11 @@ export default function PinnedMessages({ roomId, onClose }) {
       setLoading(false);
     }
     load();
-  }, [roomId]);
+  }, [roomId, tableName]);
 
   async function unpin(msgId) {
     await supabase
-      .from("messages")
+      .from(tableName) // ← same here
       .update({ pinned: false, pinned_by: null })
       .eq("id", msgId);
     setPinned((prev) => prev.filter((m) => m.id !== msgId));
@@ -32,7 +38,10 @@ export default function PinnedMessages({ roomId, onClose }) {
 
   function formatDate(ts) {
     const d = new Date(ts);
-    return `${d.toLocaleDateString()} ${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
+    return `${d.toLocaleDateString()} ${d
+      .getHours()
+      .toString()
+      .padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
   }
 
   return (
@@ -66,6 +75,7 @@ export default function PinnedMessages({ roomId, onClose }) {
           boxShadow: "0 20px 60px rgba(0,0,0,0.9)",
         }}
       >
+        {/* ── Header ── */}
         <div
           style={{
             display: "flex",
@@ -86,6 +96,17 @@ export default function PinnedMessages({ roomId, onClose }) {
             >
               PINNED MESSAGES
             </div>
+            {/* ── Shows which context we are in ── */}
+            <div
+              style={{
+                color: "#4a4a6a",
+                fontSize: "10px",
+                letterSpacing: "2px",
+                marginLeft: "4px",
+              }}
+            >
+              {tableName === "direct_messages" ? "(DM)" : "(CHANNEL)"}
+            </div>
           </div>
           <button
             onClick={onClose}
@@ -100,6 +121,7 @@ export default function PinnedMessages({ roomId, onClose }) {
           </button>
         </div>
 
+        {/* ── List ── */}
         <div style={{ flex: 1, overflowY: "auto" }}>
           {loading && (
             <div
@@ -158,7 +180,11 @@ export default function PinnedMessages({ roomId, onClose }) {
                   {msg.username}
                 </span>
                 <div
-                  style={{ display: "flex", alignItems: "center", gap: "8px" }}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                  }}
                 >
                   <span style={{ color: "#2a2a3a", fontSize: "10px" }}>
                     {formatDate(msg.created_at)}
@@ -178,6 +204,8 @@ export default function PinnedMessages({ roomId, onClose }) {
                   </button>
                 </div>
               </div>
+
+              {/* ── Message content ── */}
               <div
                 style={{
                   color: "#ffffff",
@@ -187,6 +215,22 @@ export default function PinnedMessages({ roomId, onClose }) {
               >
                 {msg.content}
               </div>
+
+              {/* ── File attachment indicator ── */}
+              {msg.file_url && (
+                <div
+                  style={{
+                    color: "#00BFFF",
+                    fontSize: "11px",
+                    marginTop: "6px",
+                    letterSpacing: "1px",
+                  }}
+                >
+                  📎 {msg.file_name || "Attachment"}
+                </div>
+              )}
+
+              {/* ── Pinned by ── */}
               {msg.pinned_by && (
                 <div
                   style={{
