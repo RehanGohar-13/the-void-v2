@@ -239,7 +239,6 @@ export default function Chat({ user }) {
     prevMessageCount.current = messages.length;
   }, [messages]);
 
-  // Track read status
   useEffect(() => {
     async function trackRead() {
       if (!activeRoom || view !== "chat") return;
@@ -252,7 +251,6 @@ export default function Chat({ user }) {
     trackRead();
   }, [activeRoom, view, messages]);
 
-  // Poll unread counts
   useEffect(() => {
     async function loadUnread() {
       const counts = {};
@@ -280,14 +278,31 @@ export default function Chat({ user }) {
     return () => clearInterval(i);
   }, [rooms, user.id]);
 
+  // ── Close all popups when switching views ──────────
   function handleViewChange(v) {
-    if (v !== view) setView(v);
+    if (v !== view) {
+      setView(v);
+      // Reset ALL overlay states so nothing gets stuck
+      setShowSearch(false);
+      setShowPinned(false);
+      setMessageMenu(null);
+      setContextMenu(null);
+      setShowEmojiPicker(null);
+      setReplyTo(null);
+      setPendingFile(null);
+    }
   }
+
   function switchRoom(room) {
     setActiveRoom(room);
     setMessages([]);
     setLoading(true);
     setView("chat");
+    setShowSearch(false);
+    setShowPinned(false);
+    setMessageMenu(null);
+    setShowEmojiPicker(null);
+    setReplyTo(null);
   }
 
   async function createRoom() {
@@ -347,9 +362,12 @@ export default function Chat({ user }) {
     if (existing) {
       await supabase.from("reactions").delete().eq("id", existing.id);
     } else {
-      await supabase
-        .from("reactions")
-        .insert({ message_id: messageId, user_id: user.id, username, emoji });
+      await supabase.from("reactions").insert({
+        message_id: messageId,
+        user_id: user.id,
+        username,
+        emoji,
+      });
     }
   }
 
@@ -374,7 +392,9 @@ export default function Chat({ user }) {
     if (!file || !activeRoom) return;
     setPendingFile(null);
     const ext = file.name.split(".").pop();
-    const uniqueName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${ext}`;
+    const uniqueName = `${Date.now()}_${Math.random()
+      .toString(36)
+      .substring(7)}.${ext}`;
     const { error: uploadError } = await supabase.storage
       .from("attachments")
       .upload(uniqueName, file);
@@ -404,6 +424,7 @@ export default function Chat({ user }) {
       y: Math.min(e.clientY, window.innerHeight - 320),
     });
   }
+
   function handleMessageRightClick(e, msg) {
     e.preventDefault();
     setMessageMenu({
@@ -427,24 +448,36 @@ export default function Chat({ user }) {
   async function handleLogout() {
     await supabase
       .from("presence")
-      .update({ status: "offline", last_seen: new Date().toISOString() })
+      .update({
+        status: "offline",
+        last_seen: new Date().toISOString(),
+      })
       .eq("user_id", user.id);
     await supabase.auth.signOut();
   }
 
   function formatTime(ts) {
     const d = new Date(ts);
-    return `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
+    return `${d.getHours().toString().padStart(2, "0")}:${d
+      .getMinutes()
+      .toString()
+      .padStart(2, "0")}`;
   }
+
   function getDateDivider(msg, prev) {
     const d = new Date(msg.created_at).toLocaleDateString();
     if (!prev) return d;
     return d !== new Date(prev.created_at).toLocaleDateString() ? d : null;
   }
+
   function groupReactionData(msgId) {
     return Object.entries(
       (reactions[msgId] || []).reduce((acc, r) => {
-        acc[r.emoji] = acc[r.emoji] || { count: 0, users: [], hasOwn: false };
+        acc[r.emoji] = acc[r.emoji] || {
+          count: 0,
+          users: [],
+          hasOwn: false,
+        };
         acc[r.emoji].count++;
         acc[r.emoji].users.push(r.username);
         if (r.user_id === user.id) acc[r.emoji].hasOwn = true;
@@ -470,6 +503,7 @@ export default function Chat({ user }) {
         left: 0,
       }}
     >
+      {/* ── Desktop Sidebar ── */}
       {!isMobile && (
         <div
           style={{
@@ -790,29 +824,31 @@ export default function Chat({ user }) {
               }}
             >
               <span
-                style={{ display: "flex", alignItems: "center", gap: "6px" }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                }}
               >
                 {room.is_private ? <Lock size={11} /> : <Hash size={11} />}
                 {room.name}
               </span>
-              {unreadCounts[room.id] &&
-                unreadCounts[room.id] > 0 &&
-                activeRoom?.id !== room.id && (
-                  <span
-                    style={{
-                      backgroundColor: "#9B30FF",
-                      color: "white",
-                      fontSize: "10px",
-                      fontWeight: "700",
-                      padding: "2px 6px",
-                      borderRadius: "10px",
-                      minWidth: "18px",
-                      textAlign: "center",
-                    }}
-                  >
-                    {unreadCounts[room.id] > 99 ? "99+" : unreadCounts[room.id]}
-                  </span>
-                )}
+              {unreadCounts[room.id] > 0 && activeRoom?.id !== room.id && (
+                <span
+                  style={{
+                    backgroundColor: "#9B30FF",
+                    color: "white",
+                    fontSize: "10px",
+                    fontWeight: "700",
+                    padding: "2px 6px",
+                    borderRadius: "10px",
+                    minWidth: "18px",
+                    textAlign: "center",
+                  }}
+                >
+                  {unreadCounts[room.id] > 99 ? "99+" : unreadCounts[room.id]}
+                </span>
+              )}
             </div>
           ))}
 
@@ -899,6 +935,7 @@ export default function Chat({ user }) {
         </div>
       )}
 
+      {/* ── Mobile Header ── */}
       {isMobile && (
         <div style={{ flexShrink: 0, width: "100%" }}>
           <div
@@ -925,7 +962,13 @@ export default function Chat({ user }) {
             >
               THE VOID
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+              }}
+            >
               <div
                 style={{
                   width: "6px",
@@ -1009,25 +1052,23 @@ export default function Chat({ user }) {
                 >
                   {room.is_private ? <Lock size={10} /> : <Hash size={10} />}{" "}
                   {room.name}
-                  {unreadCounts[room.id] &&
-                    unreadCounts[room.id] > 0 &&
-                    activeRoom?.id !== room.id && (
-                      <span
-                        style={{
-                          backgroundColor: "#9B30FF",
-                          color: "white",
-                          fontSize: "9px",
-                          fontWeight: "700",
-                          padding: "1px 5px",
-                          borderRadius: "8px",
-                          marginLeft: "4px",
-                        }}
-                      >
-                        {unreadCounts[room.id] > 99
-                          ? "99+"
-                          : unreadCounts[room.id]}
-                      </span>
-                    )}
+                  {unreadCounts[room.id] > 0 && activeRoom?.id !== room.id && (
+                    <span
+                      style={{
+                        backgroundColor: "#9B30FF",
+                        color: "white",
+                        fontSize: "9px",
+                        fontWeight: "700",
+                        padding: "1px 5px",
+                        borderRadius: "8px",
+                        marginLeft: "4px",
+                      }}
+                    >
+                      {unreadCounts[room.id] > 99
+                        ? "99+"
+                        : unreadCounts[room.id]}
+                    </span>
+                  )}
                 </button>
               ))}
               <button
@@ -1056,7 +1097,13 @@ export default function Chat({ user }) {
                 borderBottom: "1px solid #0d0d1a",
               }}
             >
-              <div style={{ display: "flex", gap: "8px", marginBottom: "6px" }}>
+              <div
+                style={{
+                  display: "flex",
+                  gap: "8px",
+                  marginBottom: "6px",
+                }}
+              >
                 <input
                   value={newRoomName}
                   onChange={(e) => setNewRoomName(e.target.value)}
@@ -1131,6 +1178,7 @@ export default function Chat({ user }) {
         </div>
       )}
 
+      {/* ── Main Content Area ── */}
       {view === "chat" ? (
         <div
           style={{
@@ -1141,7 +1189,7 @@ export default function Chat({ user }) {
             overflow: "hidden",
           }}
         >
-          {/* Channel header with search and pin buttons */}
+          {/* Channel header */}
           <div
             style={{
               padding: isMobile ? "12px 16px" : "20px 30px",
@@ -1183,7 +1231,13 @@ export default function Chat({ user }) {
                 {activeRoom?.description || "ENCRYPTED CHANNEL"}
               </div>
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+              }}
+            >
               {pinnedCount > 0 && (
                 <button
                   onClick={() => setShowPinned(true)}
@@ -1223,7 +1277,11 @@ export default function Chat({ user }) {
                 <SearchIcon size={12} /> SEARCH
               </button>
               <div
-                style={{ display: "flex", alignItems: "center", gap: "6px" }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                }}
               >
                 <div
                   style={{
@@ -1247,6 +1305,7 @@ export default function Chat({ user }) {
             </div>
           </div>
 
+          {/* Messages */}
           <div
             ref={messagesContainerRef}
             style={{
@@ -1288,7 +1347,6 @@ export default function Chat({ user }) {
                 </span>
               </div>
             )}
-
             {messages.map((msg, i) => {
               const isOwn = msg.user_id === user.id;
               const showName =
@@ -1314,6 +1372,7 @@ export default function Chat({ user }) {
             <div ref={bottomRef} />
           </div>
 
+          {/* Typing indicator */}
           {typingUsers.length > 0 && (
             <div
               style={{
@@ -1329,6 +1388,7 @@ export default function Chat({ user }) {
             </div>
           )}
 
+          {/* Reply bar */}
           {replyTo && (
             <div
               style={{
@@ -1373,6 +1433,7 @@ export default function Chat({ user }) {
             </div>
           )}
 
+          {/* Input bar */}
           <div
             style={{
               padding: isMobile ? "10px 12px" : "20px 30px",
@@ -1388,7 +1449,11 @@ export default function Chat({ user }) {
           >
             <form
               onSubmit={sendMessage}
-              style={{ display: "flex", gap: "8px", alignItems: "center" }}
+              style={{
+                display: "flex",
+                gap: "8px",
+                alignItems: "center",
+              }}
             >
               <input
                 value={text}
@@ -1472,10 +1537,12 @@ export default function Chat({ user }) {
         )
       ) : null}
 
+      {/* ── Mobile Nav ── */}
       {isMobile && (
         <MobileNav view={view} onNavigate={handleViewChange} notification={0} />
       )}
 
+      {/* ── File Upload Preview ── */}
       {pendingFile && (
         <FileUploadPreview
           file={pendingFile}
@@ -1484,19 +1551,26 @@ export default function Chat({ user }) {
         />
       )}
 
-      {showSearch && activeRoom && (
+      {/* ── Search Modal (Chat only) ── */}
+      {showSearch && activeRoom && view === "chat" && (
         <SearchMessages
           roomId={activeRoom.id}
+          tableName="messages"
           onClose={() => setShowSearch(false)}
         />
       )}
-      {showPinned && activeRoom && (
+
+      {/* ── Pinned Modal (Chat only) ── */}
+      {showPinned && activeRoom && view === "chat" && (
         <PinnedMessages
           roomId={activeRoom.id}
+          tableName="messages"
+          currentUser={user}
           onClose={() => setShowPinned(false)}
         />
       )}
 
+      {/* ── Context Menu ── */}
       {contextMenu && (
         <ContextMenu
           room={contextMenu.room}
@@ -1515,6 +1589,7 @@ export default function Chat({ user }) {
         />
       )}
 
+      {/* ── Message Menu ── */}
       {messageMenu && (
         <MessageMenu
           message={messageMenu.message}
@@ -1528,6 +1603,7 @@ export default function Chat({ user }) {
         />
       )}
 
+      {/* ── Emoji Picker ── */}
       {showEmojiPicker && (
         <EmojiPicker
           onSelect={(emoji) => {

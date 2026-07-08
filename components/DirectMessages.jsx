@@ -187,7 +187,7 @@ export default function DirectMessages({ currentUser }) {
     prevMsgCount.current = messages.length;
   }, [messages]);
 
-  // ── Sprint 5: Unread counts ──────────────────────────
+  // ── Unread counts ──────────────────────────
   useEffect(() => {
     if (activeChat) return; // Don't track when inside a chat
     async function loadUnread() {
@@ -224,7 +224,7 @@ export default function DirectMessages({ currentUser }) {
     loadUnread();
   }, [friends, activeChat, currentUser.id]);
 
-  // ── Sprint 5: Mark as read when opening DM ──────────
+  // ── Mark as read when opening DM ──────────
   useEffect(() => {
     if (!activeChat) return;
     const fid =
@@ -447,7 +447,7 @@ export default function DirectMessages({ currentUser }) {
     await supabase.from("direct_messages").delete().eq("id", id);
   }
 
-  // ── Sprint 5: Pin action ─────────────────────────────
+  // ── Pin action ─────────────────────────────
   async function pinDMMessage(msg) {
     const isPinned = msg.pinned;
     await supabase
@@ -564,7 +564,7 @@ export default function DirectMessages({ currentUser }) {
             </div>
           </div>
 
-          {/* ── Sprint 5: Search & Pin buttons ── */}
+          {/* ── Search & Pin buttons ── */}
           <div style={{ display: "flex", gap: "8px" }}>
             <button
               onClick={() => {
@@ -615,43 +615,25 @@ export default function DirectMessages({ currentUser }) {
           </div>
         </div>
 
-        {/* ── Sprint 5: Search Panel ── */}
-        <AnimatePresence>
-          {showDMSearch && (
-            <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              exit={{ opacity: 0, height: 0 }}
-              style={{ overflow: "hidden", flexShrink: 0 }}
-            >
-              <SearchMessages
-                roomId={rid}
-                tableName="direct_messages"
-                onClose={() => setShowDMSearch(false)}
-              />
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {/* ── Search Modal ── */}
+        {showDMSearch && (
+          <SearchMessages
+            roomId={rid}
+            tableName="direct_messages"
+            onClose={() => setShowDMSearch(false)}
+          />
+        )}
 
-        {/* ── Sprint 5: Pinned Panel ── */}
-        <AnimatePresence>
-          {showDMPinned && (
-            <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              exit={{ opacity: 0, height: 0 }}
-              style={{ overflow: "hidden", flexShrink: 0 }}
-            >
-              <PinnedMessages
-                roomId={rid}
-                tableName="direct_messages"
-                currentUser={currentUser}
-                onClose={() => setShowDMPinned(false)}
-                onUnpin={pinDMMessage}
-              />
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {/* ── Pinned Modal ── */}
+        {showDMPinned && (
+          <PinnedMessages
+            roomId={rid}
+            tableName="direct_messages"
+            currentUser={currentUser}
+            onClose={() => setShowDMPinned(false)}
+            onUnpin={pinDMMessage}
+          />
+        )}
 
         {/* ── Messages ── */}
         <div
