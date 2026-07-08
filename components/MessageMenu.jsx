@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { supabase } from "../lib/supabaseClient";
-import { Reply, Smile, Copy, Pencil, Trash2 } from "lucide-react";
+import { Reply, Smile, Copy, Pencil, Trash2, Pin } from "lucide-react";
 
 export default function MessageMenu({
   message,
@@ -13,6 +13,7 @@ export default function MessageMenu({
   onReply,
   onReact,
   onMessagesChanged,
+  currentUsername,
 }) {
   const [view, setView] = useState("menu");
   const [editText, setEditText] = useState(message.content);
@@ -37,11 +38,22 @@ export default function MessageMenu({
     onClose();
   }
 
+  async function togglePin() {
+    await supabase
+      .from("messages")
+      .update({
+        pinned: !message.pinned,
+        pinned_by: message.pinned ? null : currentUsername || "Unknown",
+      })
+      .eq("id", message.id);
+    onMessagesChanged();
+    onClose();
+  }
+
   function handleCopy() {
     navigator.clipboard.writeText(message.content);
     onClose();
   }
-
   function handleOverlayClick(e) {
     if (e.target === e.currentTarget) onClose();
   }
@@ -62,7 +74,7 @@ export default function MessageMenu({
         transition={{ duration: 0.15 }}
         style={{
           position: "fixed",
-          top: Math.min(position.y, window.innerHeight - 300),
+          top: Math.min(position.y, window.innerHeight - 340),
           left: Math.min(position.x, window.innerWidth - 240),
           backgroundColor: "#0a0a15",
           border: "1px solid #1a1a3a",
@@ -90,6 +102,12 @@ export default function MessageMenu({
                 onReact(message);
                 onClose();
               }}
+            />
+            <MenuItem
+              icon={<Pin size={14} />}
+              label={message.pinned ? "Unpin" : "Pin"}
+              highlight={message.pinned}
+              onClick={togglePin}
             />
             <MenuItem
               icon={<Copy size={14} />}
@@ -160,10 +178,37 @@ export default function MessageMenu({
               </div>
             )}
             <div style={{ display: "flex", gap: "8px", marginTop: "10px" }}>
-              <button onClick={saveEdit} style={btnSave}>
+              <button
+                onClick={saveEdit}
+                style={{
+                  flex: 1,
+                  padding: "10px",
+                  border: "none",
+                  borderRadius: "6px",
+                  background: "linear-gradient(135deg, #4B0082, #9B30FF)",
+                  color: "white",
+                  fontSize: "11px",
+                  fontWeight: "700",
+                  letterSpacing: "2px",
+                  cursor: "pointer",
+                }}
+              >
                 SAVE
               </button>
-              <button onClick={onClose} style={btnCancel}>
+              <button
+                onClick={onClose}
+                style={{
+                  flex: 1,
+                  padding: "10px",
+                  border: "1px solid #1a1a3a",
+                  borderRadius: "6px",
+                  backgroundColor: "transparent",
+                  color: "#4a4a6a",
+                  fontSize: "11px",
+                  letterSpacing: "2px",
+                  cursor: "pointer",
+                }}
+              >
                 CANCEL
               </button>
             </div>
@@ -199,10 +244,37 @@ export default function MessageMenu({
                 : message.content}
             </div>
             <div style={{ display: "flex", gap: "8px" }}>
-              <button onClick={deleteMessage} style={btnDanger}>
+              <button
+                onClick={deleteMessage}
+                style={{
+                  flex: 1,
+                  padding: "10px",
+                  border: "none",
+                  borderRadius: "6px",
+                  background: "#440000",
+                  color: "#ff4444",
+                  fontSize: "11px",
+                  fontWeight: "700",
+                  letterSpacing: "2px",
+                  cursor: "pointer",
+                }}
+              >
                 DELETE
               </button>
-              <button onClick={onClose} style={btnCancel}>
+              <button
+                onClick={onClose}
+                style={{
+                  flex: 1,
+                  padding: "10px",
+                  border: "1px solid #1a1a3a",
+                  borderRadius: "6px",
+                  backgroundColor: "transparent",
+                  color: "#4a4a6a",
+                  fontSize: "11px",
+                  letterSpacing: "2px",
+                  cursor: "pointer",
+                }}
+              >
                 CANCEL
               </button>
             </div>
@@ -213,7 +285,7 @@ export default function MessageMenu({
   );
 }
 
-function MenuItem({ icon, label, onClick, danger }) {
+function MenuItem({ icon, label, onClick, danger, highlight }) {
   return (
     <button
       onClick={onClick}
@@ -226,7 +298,7 @@ function MenuItem({ icon, label, onClick, danger }) {
         backgroundColor: "transparent",
         border: "none",
         borderRadius: "6px",
-        color: danger ? "#ff4444" : "#8a8aaa",
+        color: danger ? "#ff4444" : highlight ? "#FFD700" : "#8a8aaa",
         fontSize: "13px",
         cursor: "pointer",
         textAlign: "left",
@@ -235,12 +307,22 @@ function MenuItem({ icon, label, onClick, danger }) {
       onMouseOver={(e) => {
         e.currentTarget.style.backgroundColor = danger
           ? "rgba(255,68,68,0.1)"
-          : "rgba(155,48,255,0.1)";
-        e.currentTarget.style.color = danger ? "#ff4444" : "#ffffff";
+          : highlight
+            ? "rgba(255,215,0,0.1)"
+            : "rgba(155,48,255,0.1)";
+        e.currentTarget.style.color = danger
+          ? "#ff4444"
+          : highlight
+            ? "#FFD700"
+            : "#ffffff";
       }}
       onMouseOut={(e) => {
         e.currentTarget.style.backgroundColor = "transparent";
-        e.currentTarget.style.color = danger ? "#ff4444" : "#8a8aaa";
+        e.currentTarget.style.color = danger
+          ? "#ff4444"
+          : highlight
+            ? "#FFD700"
+            : "#8a8aaa";
       }}
     >
       <span style={{ display: "flex", alignItems: "center" }}>{icon}</span>
@@ -248,39 +330,3 @@ function MenuItem({ icon, label, onClick, danger }) {
     </button>
   );
 }
-
-const btnSave = {
-  flex: 1,
-  padding: "10px",
-  border: "none",
-  borderRadius: "6px",
-  background: "linear-gradient(135deg, #4B0082, #9B30FF)",
-  color: "white",
-  fontSize: "11px",
-  fontWeight: "700",
-  letterSpacing: "2px",
-  cursor: "pointer",
-};
-const btnCancel = {
-  flex: 1,
-  padding: "10px",
-  border: "1px solid #1a1a3a",
-  borderRadius: "6px",
-  backgroundColor: "transparent",
-  color: "#4a4a6a",
-  fontSize: "11px",
-  letterSpacing: "2px",
-  cursor: "pointer",
-};
-const btnDanger = {
-  flex: 1,
-  padding: "10px",
-  border: "none",
-  borderRadius: "6px",
-  background: "#440000",
-  color: "#ff4444",
-  fontSize: "11px",
-  fontWeight: "700",
-  letterSpacing: "2px",
-  cursor: "pointer",
-};

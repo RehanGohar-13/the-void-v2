@@ -15,6 +15,8 @@ import FilePreview from "./FilePreview";
 import FileUploadPreview from "./FileUploadPreview";
 import MessageBubble from "./MessageBubble";
 import DateDivider from "./DateDivider";
+import SearchMessages from "./SearchMessages";
+import PinnedMessages from "./PinnedMessages";
 import {
   Settings,
   LogOut,
@@ -24,6 +26,8 @@ import {
   MessageCircle,
   Paperclip,
   Send,
+  Search as SearchIcon,
+  Pin,
 } from "lucide-react";
 
 export default function Chat({ user }) {
@@ -45,6 +49,9 @@ export default function Chat({ user }) {
   const [reactions, setReactions] = useState({});
   const [isMobile, setIsMobile] = useState(false);
   const [pendingFile, setPendingFile] = useState(null);
+  const [showSearch, setShowSearch] = useState(false);
+  const [showPinned, setShowPinned] = useState(false);
+  const [unreadCounts, setUnreadCounts] = useState({});
   const bottomRef = useRef(null);
   const prevMessageCount = useRef(0);
   const messagesContainerRef = useRef(null);
@@ -232,6 +239,47 @@ export default function Chat({ user }) {
     prevMessageCount.current = messages.length;
   }, [messages]);
 
+  // Track read status
+  useEffect(() => {
+    async function trackRead() {
+      if (!activeRoom || view !== "chat") return;
+      await supabase.from("last_read").upsert({
+        user_id: user.id,
+        room_id: activeRoom.id,
+        read_at: new Date().toISOString(),
+      });
+    }
+    trackRead();
+  }, [activeRoom, view, messages]);
+
+  // Poll unread counts
+  useEffect(() => {
+    async function loadUnread() {
+      const counts = {};
+      for (const room of rooms) {
+        const { data: lr } = await supabase
+          .from("last_read")
+          .select("read_at")
+          .eq("user_id", user.id)
+          .eq("room_id", room.id)
+          .single();
+        const readAt = lr?.read_at || "1970-01-01";
+        const { count } = await supabase
+          .from("messages")
+          .select("id", { count: "exact", head: true })
+          .eq("room_id", room.id)
+          .gt("created_at", readAt);
+        if (count > 0) counts[room.id] = count;
+      }
+      setUnreadCounts(counts);
+    }
+    if (rooms.length > 0) loadUnread();
+    const i = setInterval(() => {
+      if (rooms.length > 0) loadUnread();
+    }, 15000);
+    return () => clearInterval(i);
+  }, [rooms, user.id]);
+
   function handleViewChange(v) {
     if (v !== view) setView(v);
   }
@@ -404,6 +452,8 @@ export default function Chat({ user }) {
       }, {}),
     );
   }
+
+  const pinnedCount = messages.filter((m) => m.pinned).length;
 
   return (
     <div
@@ -736,10 +786,33 @@ export default function Chat({ user }) {
                 display: "flex",
                 alignItems: "center",
                 gap: "6px",
+                justifyContent: "space-between",
               }}
             >
-              {room.is_private ? <Lock size={11} /> : <Hash size={11} />}
-              {room.name}
+              <span
+                style={{ display: "flex", alignItems: "center", gap: "6px" }}
+              >
+                {room.is_private ? <Lock size={11} /> : <Hash size={11} />}
+                {room.name}
+              </span>
+              {unreadCounts[room.id] &&
+                unreadCounts[room.id] > 0 &&
+                activeRoom?.id !== room.id && (
+                  <span
+                    style={{
+                      backgroundColor: "#9B30FF",
+                      color: "white",
+                      fontSize: "10px",
+                      fontWeight: "700",
+                      padding: "2px 6px",
+                      borderRadius: "10px",
+                      minWidth: "18px",
+                      textAlign: "center",
+                    }}
+                  >
+                    {unreadCounts[room.id] > 99 ? "99+" : unreadCounts[room.id]}
+                  </span>
+                )}
             </div>
           ))}
 
@@ -931,10 +1004,30 @@ export default function Chat({ user }) {
                     display: "flex",
                     alignItems: "center",
                     gap: "4px",
+                    position: "relative",
                   }}
                 >
                   {room.is_private ? <Lock size={10} /> : <Hash size={10} />}{" "}
                   {room.name}
+                  {unreadCounts[room.id] &&
+                    unreadCounts[room.id] > 0 &&
+                    activeRoom?.id !== room.id && (
+                      <span
+                        style={{
+                          backgroundColor: "#9B30FF",
+                          color: "white",
+                          fontSize: "9px",
+                          fontWeight: "700",
+                          padding: "1px 5px",
+                          borderRadius: "8px",
+                          marginLeft: "4px",
+                        }}
+                      >
+                        {unreadCounts[room.id] > 99
+                          ? "99+"
+                          : unreadCounts[room.id]}
+                      </span>
+                    )}
                 </button>
               ))}
               <button
@@ -1048,6 +1141,7 @@ export default function Chat({ user }) {
             overflow: "hidden",
           }}
         >
+          {/* Channel header with search and pin buttons */}
           <div
             style={{
               padding: isMobile ? "12px 16px" : "20px 30px",
@@ -1089,24 +1183,66 @@ export default function Chat({ user }) {
                 {activeRoom?.description || "ENCRYPTED CHANNEL"}
               </div>
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-              <div
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              {pinnedCount > 0 && (
+                <button
+                  onClick={() => setShowPinned(true)}
+                  style={{
+                    background: "transparent",
+                    border: "1px solid rgba(255,215,0,0.3)",
+                    borderRadius: "6px",
+                    padding: "6px 10px",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "4px",
+                    color: "#FFD700",
+                    fontSize: "11px",
+                    letterSpacing: "1px",
+                  }}
+                >
+                  <Pin size={12} /> {pinnedCount}
+                </button>
+              )}
+              <button
+                onClick={() => setShowSearch(true)}
                 style={{
-                  width: "6px",
-                  height: "6px",
-                  borderRadius: "50%",
-                  backgroundColor: "#00BFFF",
-                  boxShadow: "0 0 6px #00BFFF",
-                }}
-              />
-              <div
-                style={{
-                  color: "#2a2a3a",
+                  background: "transparent",
+                  border: "1px solid #1a1a3a",
+                  borderRadius: "6px",
+                  padding: "6px 10px",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "4px",
+                  color: "#4a4a6a",
                   fontSize: "11px",
                   letterSpacing: "1px",
                 }}
               >
-                LIVE
+                <SearchIcon size={12} /> SEARCH
+              </button>
+              <div
+                style={{ display: "flex", alignItems: "center", gap: "6px" }}
+              >
+                <div
+                  style={{
+                    width: "6px",
+                    height: "6px",
+                    borderRadius: "50%",
+                    backgroundColor: "#00BFFF",
+                    boxShadow: "0 0 6px #00BFFF",
+                  }}
+                />
+                <div
+                  style={{
+                    color: "#2a2a3a",
+                    fontSize: "11px",
+                    letterSpacing: "1px",
+                  }}
+                >
+                  LIVE
+                </div>
               </div>
             </div>
           </div>
@@ -1348,6 +1484,19 @@ export default function Chat({ user }) {
         />
       )}
 
+      {showSearch && activeRoom && (
+        <SearchMessages
+          roomId={activeRoom.id}
+          onClose={() => setShowSearch(false)}
+        />
+      )}
+      {showPinned && activeRoom && (
+        <PinnedMessages
+          roomId={activeRoom.id}
+          onClose={() => setShowPinned(false)}
+        />
+      )}
+
       {contextMenu && (
         <ContextMenu
           room={contextMenu.room}
@@ -1375,6 +1524,7 @@ export default function Chat({ user }) {
           onReply={(msg) => setReplyTo(msg)}
           onReact={(msg) => setShowEmojiPicker(msg)}
           onMessagesChanged={refreshMessages}
+          currentUsername={username}
         />
       )}
 

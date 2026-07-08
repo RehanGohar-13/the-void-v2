@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
 import FilePreview from "./FilePreview";
+import { Pin } from "lucide-react";
 
 export default function MessageBubble({
   msg,
@@ -43,7 +43,6 @@ export default function MessageBubble({
         marginTop: showName ? "16px" : "2px",
       }}
     >
-      {/* Username */}
       {showName && (
         <div
           style={{
@@ -51,13 +50,22 @@ export default function MessageBubble({
             fontSize: "11px",
             letterSpacing: "1px",
             marginBottom: "4px",
+            display: "flex",
+            alignItems: "center",
+            gap: "6px",
           }}
         >
           {isOwn ? "YOU" : msg.username}
+          {msg.pinned && <Pin size={10} style={{ color: "#FFD700" }} />}
         </div>
       )}
 
-      {/* Reply preview */}
+      {!showName && msg.pinned && (
+        <div style={{ marginBottom: "2px" }}>
+          <Pin size={10} style={{ color: "#FFD700" }} />
+        </div>
+      )}
+
       {msg.reply_to_content && (
         <div
           style={{
@@ -86,7 +94,6 @@ export default function MessageBubble({
         </div>
       )}
 
-      {/* Text bubble - only show if there is actual text content */}
       {hasContent && !(hasFile && !msg.content.trim()) && (
         <div
           style={{
@@ -111,6 +118,7 @@ export default function MessageBubble({
               lineHeight: "1.5",
               wordBreak: "break-word",
               boxShadow: isOwn ? "0 4px 20px rgba(155,48,255,0.2)" : "none",
+              borderTop: msg.pinned ? "2px solid rgba(255,215,0,0.3)" : "none",
             }}
           >
             {msg.content}
@@ -140,7 +148,6 @@ export default function MessageBubble({
         </div>
       )}
 
-      {/* File preview */}
       {hasFile && (
         <div
           style={{
@@ -157,31 +164,21 @@ export default function MessageBubble({
             isMobile={isMobile}
           />
           <div
-            style={{
-              color: "#2a2a3a",
-              fontSize: "10px",
-              whiteSpace: "nowrap",
-            }}
+            style={{ color: "#2a2a3a", fontSize: "10px", whiteSpace: "nowrap" }}
           >
             {formatTime(msg.created_at)}
           </div>
         </div>
       )}
 
-      {/* No content and no file - just timestamp */}
       {!hasContent && !hasFile && (
         <div
-          style={{
-            color: "#2a2a3a",
-            fontSize: "10px",
-            whiteSpace: "nowrap",
-          }}
+          style={{ color: "#2a2a3a", fontSize: "10px", whiteSpace: "nowrap" }}
         >
           {formatTime(msg.created_at)}
         </div>
       )}
 
-      {/* Reactions */}
       {reactions && reactions.length > 0 && (
         <div
           style={{
