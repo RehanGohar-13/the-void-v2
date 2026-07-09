@@ -52,5 +52,29 @@ export default function AppShell() {
     );
   }
 
-  return user ? <Chat user={user} /> : <Auth />;
+  // ── Extra safety guard ───────────────────────────────
+  if (!user) return <Auth />;
+
+  // ── Only render Chat when user is 100% confirmed ────
+  if (!user.id || !user.email) {
+    return (
+      <div
+        style={{
+          minHeight: "100dvh",
+          backgroundColor: "#000000",
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          color: "#9B30FF",
+          fontSize: "14px",
+          fontFamily: "Segoe UI, Arial, sans-serif",
+          letterSpacing: "4px",
+        }}
+      >
+        INITIALIZING THE VOID...
+      </div>
+    );
+  }
+
+  return <Chat user={user} />;
 }

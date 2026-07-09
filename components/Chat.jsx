@@ -62,7 +62,8 @@ const DirectMessages = forwardRef(function DirectMessages(
   const bottomRef = useRef(null);
   const prevMsgCount = useRef(0);
   const msgContainerRef = useRef(null);
-  const username = currentUser.user_metadata?.username || currentUser.email;
+  const username =
+    currentUser?.user_metadata?.username || currentUser?.email || "Unknown";
   const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
 
   // ── Expose reset() to Chat.jsx via ref ──────────────
