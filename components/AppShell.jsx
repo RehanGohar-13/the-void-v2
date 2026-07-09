@@ -6,18 +6,20 @@ import Auth from "./Auth";
 import Chat from "./Chat";
 
 export default function AppShell() {
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState(undefined); // ← undefined = not checked yet
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let alive = true;
 
+    // Check existing session first
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (!alive) return;
       setUser(session?.user ?? null);
       setLoading(false);
     });
 
+    // Listen for auth changes
     const { data: listener } = supabase.auth.onAuthStateChange(
       (_event, session) => {
         if (!alive) return;
@@ -32,7 +34,8 @@ export default function AppShell() {
     };
   }, []);
 
-  if (loading) {
+  // ── Still checking session ───────────────────────────
+  if (loading || user === undefined) {
     return (
       <div
         style={{
@@ -52,10 +55,10 @@ export default function AppShell() {
     );
   }
 
-  // ── Extra safety guard ───────────────────────────────
+  // ── Not logged in ────────────────────────────────────
   if (!user) return <Auth />;
 
-  // ── Only render Chat when user is 100% confirmed ────
+  // ── Logged in but user object incomplete ────────────
   if (!user.id || !user.email) {
     return (
       <div
@@ -76,5 +79,6 @@ export default function AppShell() {
     );
   }
 
+  // ── User fully loaded — safe to render ──────────────
   return <Chat user={user} />;
 }
