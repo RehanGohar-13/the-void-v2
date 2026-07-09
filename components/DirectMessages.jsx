@@ -238,49 +238,75 @@ const DirectMessages = forwardRef(function DirectMessages(
 
   // ── Mark as read when opening DM ────────────────────
   useEffect(() => {
-    if (!activeChat || !activeChatRoomId) return;
-    supabase.from("last_read").upsert({
-      user_id: currentUser.id,
-      room_id: activeChatRoomId,
-      read_at: new Date().toISOString(),
-    });
+    if (!activeChat || !activeChatRoomId || !currentUser?.id) return;
+
+    const now = new Date().toISOString();
+
+    supabase.from("last_read").upsert(
+      {
+        user_id: currentUser.id,
+        room_id: activeChatRoomId,
+        read_at: now,
+      },
+      {
+        onConflict: "user_id,room_id",
+      },
+    );
+
+    // Clear badge immediately for the DM you opened
     setDmUnreadCounts((prev) => {
       const next = { ...prev };
       delete next[activeChat.id];
       return next;
     });
-  }, [activeChat, activeChatRoomId, currentUser.id]);
+  }, [activeChat?.id, activeChatRoomId, messages.length, currentUser?.id]);
 
   // ── Unread counts ────────────────────────────────────
   useEffect(() => {
-    if (activeChat) return;
+    if (activeChat || !friends.length || !currentUser?.id) return;
+
+    let alive = true;
+
     async function loadUnread() {
-      if (!friends.length) return;
       const counts = {};
+
       for (const f of friends) {
         const fid = f.from_user === currentUser.id ? f.to_user : f.from_user;
         const rid = getRoomId(currentUser.id, fid);
-        const { data: lr } = await supabase
+
+        const { data: lrRows } = await supabase
           .from("last_read")
           .select("read_at")
           .eq("user_id", currentUser.id)
           .eq("room_id", rid)
-          .single();
-        let query = supabase
+          .order("read_at", { ascending: false })
+          .limit(1);
+
+        const readAt = lrRows?.[0]?.read_at || "1970-01-01T00:00:00.000Z";
+
+        const { count } = await supabase
           .from("direct_messages")
-          .select("id", { count: "exact" })
+          .select("id", { count: "exact", head: true })
           .eq("room_id", rid)
-          .neq("user_id", currentUser.id);
-        if (lr?.read_at) {
-          query = query.gt("created_at", lr.read_at);
-        }
-        const { count } = await query;
+          .neq("user_id", currentUser.id)
+          .gt("created_at", readAt);
+
         if (count > 0) counts[f.id] = count;
       }
+
+      if (!alive) return;
       setDmUnreadCounts(counts);
     }
+
     loadUnread();
-  }, [friends, activeChat, currentUser.id]);
+
+    const i = setInterval(loadUnread, 5000);
+
+    return () => {
+      alive = false;
+      clearInterval(i);
+    };
+  }, [friends, activeChat, currentUser?.id]);
 
   // ── Open a DM conversation ───────────────────────────
   function openChat(f) {

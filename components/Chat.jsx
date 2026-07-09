@@ -240,44 +240,70 @@ export default function Chat({ user }) {
     prevMessageCount.current = messages.length;
   }, [messages]);
 
+  // Track read status
   useEffect(() => {
     async function trackRead() {
-      if (!activeRoom || view !== "chat") return;
-      await supabase.from("last_read").upsert({
-        user_id: user.id,
-        room_id: activeRoom.id,
-        read_at: new Date().toISOString(),
+      if (!activeRoom || view !== "chat" || !user?.id) return;
+
+      const now = new Date().toISOString();
+
+      await supabase.from("last_read").upsert(
+        {
+          user_id: user.id,
+          room_id: activeRoom.id,
+          read_at: now,
+        },
+        {
+          onConflict: "user_id,room_id",
+        },
+      );
+
+      // Clear unread badge immediately for the room you are reading
+      setUnreadCounts((prev) => {
+        const next = { ...prev };
+        delete next[activeRoom.id];
+        return next;
       });
     }
+
     trackRead();
-  }, [activeRoom, view, messages]);
+  }, [activeRoom?.id, view, messages.length, user?.id]);
 
   useEffect(() => {
+    if (!rooms.length || !user?.id) return;
+    let alive = true;
     async function loadUnread() {
       const counts = {};
       for (const room of rooms) {
-        const { data: lr } = await supabase
+        const { data: lrRows } = await supabase
           .from("last_read")
           .select("read_at")
           .eq("user_id", user.id)
           .eq("room_id", room.id)
-          .single();
-        const readAt = lr?.read_at || "1970-01-01";
+          .order("read_at", { ascending: false })
+          .limit(1);
+        const readAt = lrRows?.[0]?.read_at || "1970-01-01T00:00:00.000Z";
         const { count } = await supabase
           .from("messages")
           .select("id", { count: "exact", head: true })
           .eq("room_id", room.id)
+          .neq("user_id", user.id)
           .gt("created_at", readAt);
         if (count > 0) counts[room.id] = count;
       }
+      if (!alive) return;
+      if (view === "chat" && activeRoom?.id) {
+        delete counts[activeRoom.id];
+      }
       setUnreadCounts(counts);
     }
-    if (rooms.length > 0) loadUnread();
-    const i = setInterval(() => {
-      if (rooms.length > 0) loadUnread();
-    }, 15000);
-    return () => clearInterval(i);
-  }, [rooms, user.id]);
+    loadUnread();
+    const i = setInterval(loadUnread, 5000);
+    return () => {
+      alive = false;
+      clearInterval(i);
+    };
+  }, [rooms, user?.id, view, activeRoom?.id]);
 
   // ── View switching — resets ALL overlays ────────────
   function handleViewChange(v) {
