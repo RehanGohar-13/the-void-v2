@@ -1,6 +1,12 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import {
+  useState,
+  useEffect,
+  useRef,
+  forwardRef,
+  useImperativeHandle,
+} from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { supabase } from "../lib/supabaseClient";
 import {
@@ -28,7 +34,10 @@ import SearchMessages from "./SearchMessages";
 import PinnedMessages from "./PinnedMessages";
 import EmojiPicker from "./EmojiPicker";
 
-export default function DirectMessages({ currentUser }) {
+const DirectMessages = forwardRef(function DirectMessages(
+  { currentUser },
+  ref,
+) {
   const [tab, setTab] = useState("friends");
   const [friends, setFriends] = useState([]);
   const [requests, setRequests] = useState([]);
@@ -36,7 +45,7 @@ export default function DirectMessages({ currentUser }) {
   const [searchResult, setSearchResult] = useState(null);
   const [searchError, setSearchError] = useState("");
   const [activeChat, setActiveChat] = useState(null);
-  const [activeChatRoomId, setActiveChatRoomId] = useState(null); // ← NEW
+  const [activeChatRoomId, setActiveChatRoomId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState("");
   const [notification, setNotification] = useState(0);
@@ -57,6 +66,23 @@ export default function DirectMessages({ currentUser }) {
     currentUser?.user_metadata?.username || currentUser?.email || "Unknown";
   const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
 
+  // ── Expose reset() to Chat.jsx via ref ──────────────
+  useImperativeHandle(ref, () => ({
+    reset() {
+      setActiveChat(null);
+      setActiveChatRoomId(null);
+      setMessages([]);
+      setShowDMSearch(false);
+      setShowDMPinned(false);
+      setMessageMenu(null);
+      setShowEmojiPicker(null);
+      setReplyTo(null);
+      setPendingFile(null);
+      prevMsgCount.current = 0;
+    },
+  }));
+
+  // ── Helpers ──────────────────────────────────────────
   function getRoomId(a, b) {
     return [a, b].sort().join("_");
   }
@@ -261,7 +287,7 @@ export default function DirectMessages({ currentUser }) {
     const fid = f.from_user === currentUser.id ? f.to_user : f.from_user;
     const rid = getRoomId(currentUser.id, fid);
     setActiveChat(f);
-    setActiveChatRoomId(rid); // ← store roomId in state
+    setActiveChatRoomId(rid);
     setMessages([]);
     setShowDMSearch(false);
     setShowDMPinned(false);
@@ -318,6 +344,7 @@ export default function DirectMessages({ currentUser }) {
     }
     setSearchResult(data);
   }
+
   async function sendRequest(toUser) {
     const { error } = await supabase.from("friendships").insert({
       from_user: currentUser.id,
@@ -332,18 +359,21 @@ export default function DirectMessages({ currentUser }) {
       setSearchError("Request sent!");
     }
   }
+
   async function acceptRequest(id) {
     await supabase
       .from("friendships")
       .update({ status: "accepted" })
       .eq("id", id);
   }
+
   async function declineRequest(id) {
     await supabase
       .from("friendships")
       .update({ status: "declined" })
       .eq("id", id);
   }
+
   async function blockUser(id) {
     await supabase
       .from("friendships")
@@ -989,7 +1019,6 @@ export default function DirectMessages({ currentUser }) {
                   >
                     {getFriendName(f).charAt(0).toUpperCase()}
                   </div>
-                  {/* Unread badge */}
                   {dmUnreadCounts[f.id] > 0 && (
                     <div
                       style={{
@@ -1315,7 +1344,7 @@ export default function DirectMessages({ currentUser }) {
       </AnimatePresence>
     </div>
   );
-}
+});
 
 // ════════════════════════════════════════════════════
 // DM MESSAGE MENU
@@ -1573,3 +1602,5 @@ function MItem({ icon, label, onClick, danger }) {
     </button>
   );
 }
+
+export default DirectMessages;

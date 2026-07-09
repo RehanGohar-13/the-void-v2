@@ -1,397 +1,346 @@
 "use client";
 
-import {
-  useState,
-  useEffect,
-  useRef,
-  forwardRef,
-  useImperativeHandle,
-} from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { useState, useEffect, useRef } from "react";
+import { motion } from "framer-motion";
 import { supabase } from "../lib/supabaseClient";
-import {
-  Reply,
-  Smile,
-  Copy,
-  Pencil,
-  Trash2,
-  Paperclip,
-  Send,
-  ArrowLeft,
-  Search as SearchIcon,
-  UserPlus,
-  UserCheck,
-  UserX,
-  Ban,
-  Pin,
-  Search,
-} from "lucide-react";
+import DirectMessages from "./DirectMessages";
+import ContextMenu from "./ContextMenu";
+import MessageMenu from "./MessageMenu";
+import MobileNav from "./MobileNav";
+import OnlinePanel from "./OnlinePanel";
+import MobileSettings from "./MobileSettings";
+import SettingsPage from "./SettingsPage";
+import EmojiPicker from "./EmojiPicker";
 import FilePreview from "./FilePreview";
 import FileUploadPreview from "./FileUploadPreview";
 import MessageBubble from "./MessageBubble";
 import DateDivider from "./DateDivider";
 import SearchMessages from "./SearchMessages";
 import PinnedMessages from "./PinnedMessages";
-import EmojiPicker from "./EmojiPicker";
+import {
+  Settings,
+  LogOut,
+  Plus,
+  Hash,
+  Lock,
+  MessageCircle,
+  Paperclip,
+  Send,
+  Search as SearchIcon,
+  Pin,
+} from "lucide-react";
 
-const DirectMessages = forwardRef(function DirectMessages(
-  { currentUser },
-  ref,
-) {
-  const [tab, setTab] = useState("friends");
-  const [friends, setFriends] = useState([]);
-  const [requests, setRequests] = useState([]);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchResult, setSearchResult] = useState(null);
-  const [searchError, setSearchError] = useState("");
-  const [activeChat, setActiveChat] = useState(null);
-  const [activeChatRoomId, setActiveChatRoomId] = useState(null);
+export default function Chat({ user }) {
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState("");
-  const [notification, setNotification] = useState(0);
-  const [replyTo, setReplyTo] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [view, setView] = useState("chat");
+  const [rooms, setRooms] = useState([]);
+  const [activeRoom, setActiveRoom] = useState(null);
+  const [showNewRoom, setShowNewRoom] = useState(false);
+  const [newRoomName, setNewRoomName] = useState("");
+  const [newRoomPrivate, setNewRoomPrivate] = useState(false);
+  const [onlineUsers, setOnlineUsers] = useState([]);
+  const [typingUsers, setTypingUsers] = useState([]);
+  const [contextMenu, setContextMenu] = useState(null);
   const [messageMenu, setMessageMenu] = useState(null);
+  const [replyTo, setReplyTo] = useState(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(null);
   const [reactions, setReactions] = useState({});
-  const [typingUsers, setTypingUsers] = useState([]);
+  const [isMobile, setIsMobile] = useState(false);
   const [pendingFile, setPendingFile] = useState(null);
-  const [showDMSearch, setShowDMSearch] = useState(false);
-  const [showDMPinned, setShowDMPinned] = useState(false);
-  const [dmUnreadCounts, setDmUnreadCounts] = useState({});
-
+  const [showSearch, setShowSearch] = useState(false);
+  const [showPinned, setShowPinned] = useState(false);
+  const [unreadCounts, setUnreadCounts] = useState({});
   const bottomRef = useRef(null);
-  const prevMsgCount = useRef(0);
-  const msgContainerRef = useRef(null);
-  const username =
-    currentUser?.user_metadata?.username || currentUser?.email || "Unknown";
-  const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
+  const prevMessageCount = useRef(0);
+  const messagesContainerRef = useRef(null);
+  const dmRef = useRef(null); // ← ref to DirectMessages reset fn
+  const username = user.user_metadata?.username || user.email;
 
-  // ── Expose reset() to Chat.jsx via ref ──────────────
-  useImperativeHandle(ref, () => ({
-    reset() {
-      setActiveChat(null);
-      setActiveChatRoomId(null);
-      setMessages([]);
-      setShowDMSearch(false);
-      setShowDMPinned(false);
-      setMessageMenu(null);
-      setShowEmojiPicker(null);
-      setReplyTo(null);
-      setPendingFile(null);
-      prevMsgCount.current = 0;
-    },
-  }));
+  useEffect(() => {
+    function checkMobile() {
+      setIsMobile(window.innerWidth < 768);
+    }
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
 
-  // ── Helpers ──────────────────────────────────────────
-  function getRoomId(a, b) {
-    return [a, b].sort().join("_");
-  }
-  function getFriendName(f) {
-    return f.from_user === currentUser.id ? f.to_username : f.from_username;
-  }
-  function formatTime(ts) {
-    const d = new Date(ts);
-    return `${d.getHours().toString().padStart(2, "0")}:${d
-      .getMinutes()
-      .toString()
-      .padStart(2, "0")}`;
-  }
-  function getDateDivider(msg, prev) {
-    const d = new Date(msg.created_at).toLocaleDateString();
-    if (!prev) return d;
-    return d !== new Date(prev.created_at).toLocaleDateString() ? d : null;
-  }
-  function groupReactionData(mid) {
-    return Object.entries(
-      (reactions[mid] || []).reduce((a, r) => {
-        a[r.emoji] = a[r.emoji] || {
-          count: 0,
-          users: [],
-          hasOwn: false,
-        };
-        a[r.emoji].count++;
-        a[r.emoji].users.push(r.username);
-        if (r.user_id === currentUser.id) a[r.emoji].hasOwn = true;
-        return a;
-      }, {}),
-    );
+  useEffect(() => {
+    loadRooms();
+  }, [user.id]);
+
+  async function loadRooms() {
+    const { data } = await supabase
+      .from("rooms")
+      .select("*")
+      .or(`created_by.eq.${user.id},created_by.is.null,is_private.eq.false`)
+      .order("created_at", { ascending: true });
+    const { data: memberRooms } = await supabase
+      .from("channel_members")
+      .select("room_id")
+      .eq("user_id", user.id);
+    let allRooms = data || [];
+    if (memberRooms && memberRooms.length > 0) {
+      const ids = memberRooms.map((m) => m.room_id);
+      const { data: privateRooms } = await supabase
+        .from("rooms")
+        .select("*")
+        .in("id", ids);
+      if (privateRooms) {
+        const existingIds = allRooms.map((r) => r.id);
+        privateRooms.forEach((r) => {
+          if (!existingIds.includes(r.id)) allRooms.push(r);
+        });
+      }
+    }
+    allRooms.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+    if (allRooms.length > 0) {
+      setRooms(allRooms);
+      setActiveRoom((prev) => {
+        if (prev) {
+          const s = allRooms.find((r) => r.id === prev.id);
+          if (s) return s;
+        }
+        return allRooms[0];
+      });
+    } else {
+      setRooms([]);
+      setActiveRoom(null);
+    }
   }
 
-  // ── Load friends & requests ──────────────────────────
+  async function refreshRooms() {
+    await loadRooms();
+  }
+
+  useEffect(() => {
+    async function updatePresence() {
+      await supabase.from("presence").upsert({
+        user_id: user.id,
+        username,
+        status: "online",
+        last_seen: new Date().toISOString(),
+      });
+    }
+    updatePresence();
+    const i = setInterval(updatePresence, 30000);
+    return () => clearInterval(i);
+  }, [user.id, username]);
+
   useEffect(() => {
     let mounted = true;
-    let interval;
-    async function load() {
-      const { data: accepted } = await supabase
-        .from("friendships")
+    async function loadOnline() {
+      const cutoff = new Date(Date.now() - 60000).toISOString();
+      const { data } = await supabase
+        .from("presence")
         .select("*")
-        .or(`from_user.eq.${currentUser.id},to_user.eq.${currentUser.id}`)
-        .eq("status", "accepted");
-      const { data: pending } = await supabase
-        .from("friendships")
-        .select("*")
-        .eq("to_user", currentUser.id)
-        .eq("status", "pending");
-      if (!mounted) return;
-      setFriends(accepted || []);
-      setRequests(pending || []);
-      setNotification((pending || []).length);
+        .gte("last_seen", cutoff);
+      if (mounted) setOnlineUsers(data || []);
     }
-    load();
-    interval = setInterval(() => {
-      if (mounted && !activeChat) load();
-    }, 5000);
+    loadOnline();
+    const i = setInterval(loadOnline, 10000);
     return () => {
       mounted = false;
-      clearInterval(interval);
+      clearInterval(i);
     };
-  }, [currentUser.id, activeChat]);
+  }, []);
 
-  // ── Load DM messages ─────────────────────────────────
   useEffect(() => {
-    let mounted = true;
     let interval;
-    async function loadDMs() {
-      if (!activeChat || !activeChatRoomId) return;
+    let mounted = true;
+    async function loadMessages() {
+      if (!activeRoom || view !== "chat") return;
       const { data } = await supabase
-        .from("direct_messages")
+        .from("messages")
         .select("*")
-        .eq("room_id", activeChatRoomId)
+        .eq("room_id", activeRoom.id)
         .order("created_at", { ascending: true })
         .limit(100);
-      if (mounted) setMessages(data || []);
+      if (mounted && data) {
+        setMessages(data);
+        setLoading(false);
+      }
     }
-    if (activeChat && activeChatRoomId) {
-      loadDMs();
-      interval = setInterval(loadDMs, 3000);
+    if (activeRoom && view === "chat") {
+      loadMessages();
+      interval = setInterval(loadMessages, 5000);
     }
     return () => {
       mounted = false;
       if (interval) clearInterval(interval);
     };
-  }, [activeChat, activeChatRoomId]);
+  }, [activeRoom, view]);
 
-  // ── Load reactions ───────────────────────────────────
   useEffect(() => {
-    if (!messages.length) return;
+    if (!messages.length) {
+      setReactions({});
+      return;
+    }
     async function lr() {
       const ids = messages.map((m) => m.id);
       const { data } = await supabase
         .from("reactions")
         .select("*")
         .in("message_id", ids);
-      const g = {};
+      const grouped = {};
       (data || []).forEach((r) => {
-        if (!g[r.message_id]) g[r.message_id] = [];
-        g[r.message_id].push(r);
+        if (!grouped[r.message_id]) grouped[r.message_id] = [];
+        grouped[r.message_id].push(r);
       });
-      setReactions(g);
+      setReactions(grouped);
     }
     lr();
   }, [messages]);
 
-  // ── Typing indicator ─────────────────────────────────
   useEffect(() => {
     let interval;
     let mounted = true;
-    async function check() {
-      if (!activeChatRoomId) return;
+    async function checkTyping() {
+      if (!activeRoom || view !== "chat") return;
       const cutoff = new Date(Date.now() - 3000).toISOString();
       const { data } = await supabase
         .from("typing")
         .select("*")
-        .eq("room_id", activeChatRoomId)
+        .eq("room_id", activeRoom.id)
         .gte("typing_at", cutoff)
-        .neq("user_id", currentUser.id);
+        .neq("user_id", user.id);
       if (mounted) setTypingUsers(data || []);
     }
-    if (activeChat) {
-      check();
-      interval = setInterval(check, 2000);
+    if (view === "chat") {
+      checkTyping();
+      interval = setInterval(checkTyping, 2000);
     }
     return () => {
       mounted = false;
       if (interval) clearInterval(interval);
     };
-  }, [activeChat, activeChatRoomId, currentUser.id]);
+  }, [view, activeRoom, user.id]);
 
-  // ── Auto scroll ──────────────────────────────────────
   useEffect(() => {
-    const c = msgContainerRef.current;
-    if (!c) return;
-    if (prevMsgCount.current === 0 && messages.length > 0) {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    if (prevMessageCount.current === 0 && messages.length > 0) {
       setTimeout(() => {
         bottomRef.current?.scrollIntoView({ behavior: "instant" });
       }, 80);
-      prevMsgCount.current = messages.length;
+      prevMessageCount.current = messages.length;
       return;
     }
-    if (messages.length > prevMsgCount.current) {
-      const near = c.scrollHeight - c.scrollTop - c.clientHeight < 150;
+    if (messages.length > prevMessageCount.current) {
+      const near =
+        container.scrollHeight - container.scrollTop - container.clientHeight <
+        150;
       if (near)
         setTimeout(() => {
           bottomRef.current?.scrollIntoView({ behavior: "smooth" });
         }, 80);
     }
-    prevMsgCount.current = messages.length;
+    prevMessageCount.current = messages.length;
   }, [messages]);
 
-  // ── Mark as read when opening DM ────────────────────
   useEffect(() => {
-    if (!activeChat || !activeChatRoomId) return;
-    supabase.from("last_read").upsert({
-      user_id: currentUser.id,
-      room_id: activeChatRoomId,
-      read_at: new Date().toISOString(),
-    });
-    setDmUnreadCounts((prev) => {
-      const next = { ...prev };
-      delete next[activeChat.id];
-      return next;
-    });
-  }, [activeChat, activeChatRoomId, currentUser.id]);
+    async function trackRead() {
+      if (!activeRoom || view !== "chat") return;
+      await supabase.from("last_read").upsert({
+        user_id: user.id,
+        room_id: activeRoom.id,
+        read_at: new Date().toISOString(),
+      });
+    }
+    trackRead();
+  }, [activeRoom, view, messages]);
 
-  // ── Unread counts ────────────────────────────────────
   useEffect(() => {
-    if (activeChat) return;
     async function loadUnread() {
-      if (!friends.length) return;
       const counts = {};
-      for (const f of friends) {
-        const fid = f.from_user === currentUser.id ? f.to_user : f.from_user;
-        const rid = getRoomId(currentUser.id, fid);
+      for (const room of rooms) {
         const { data: lr } = await supabase
           .from("last_read")
           .select("read_at")
-          .eq("user_id", currentUser.id)
-          .eq("room_id", rid)
+          .eq("user_id", user.id)
+          .eq("room_id", room.id)
           .single();
-        let query = supabase
-          .from("direct_messages")
-          .select("id", { count: "exact" })
-          .eq("room_id", rid)
-          .neq("user_id", currentUser.id);
-        if (lr?.read_at) {
-          query = query.gt("created_at", lr.read_at);
-        }
-        const { count } = await query;
-        if (count > 0) counts[f.id] = count;
+        const readAt = lr?.read_at || "1970-01-01";
+        const { count } = await supabase
+          .from("messages")
+          .select("id", { count: "exact", head: true })
+          .eq("room_id", room.id)
+          .gt("created_at", readAt);
+        if (count > 0) counts[room.id] = count;
       }
-      setDmUnreadCounts(counts);
+      setUnreadCounts(counts);
     }
-    loadUnread();
-  }, [friends, activeChat, currentUser.id]);
+    if (rooms.length > 0) loadUnread();
+    const i = setInterval(() => {
+      if (rooms.length > 0) loadUnread();
+    }, 15000);
+    return () => clearInterval(i);
+  }, [rooms, user.id]);
 
-  // ── Open a DM conversation ───────────────────────────
-  function openChat(f) {
-    const fid = f.from_user === currentUser.id ? f.to_user : f.from_user;
-    const rid = getRoomId(currentUser.id, fid);
-    setActiveChat(f);
-    setActiveChatRoomId(rid);
+  // ── View switching — resets ALL overlays ────────────
+  function handleViewChange(v) {
+    if (v === view) return;
+    // Reset Chat.jsx overlays
+    setShowSearch(false);
+    setShowPinned(false);
+    setMessageMenu(null);
+    setContextMenu(null);
+    setShowEmojiPicker(null);
+    setReplyTo(null);
+    setPendingFile(null);
+    // Reset DirectMessages overlays via ref
+    if (dmRef.current?.reset) {
+      dmRef.current.reset();
+    }
+    setView(v);
+  }
+
+  function switchRoom(room) {
+    setActiveRoom(room);
     setMessages([]);
-    setShowDMSearch(false);
-    setShowDMPinned(false);
+    setLoading(true);
+    setShowSearch(false);
+    setShowPinned(false);
     setMessageMenu(null);
     setShowEmojiPicker(null);
     setReplyTo(null);
-    prevMsgCount.current = 0;
+    setView("chat");
   }
 
-  // ── Close a DM conversation ──────────────────────────
-  function closeChat() {
-    setActiveChat(null);
-    setActiveChatRoomId(null);
-    setMessages([]);
-    setShowDMSearch(false);
-    setShowDMPinned(false);
-    setMessageMenu(null);
-    setShowEmojiPicker(null);
-    setReplyTo(null);
-    prevMsgCount.current = 0;
-  }
-
-  // ── Friend / request actions ─────────────────────────
-  async function searchUser() {
-    setSearchError("");
-    setSearchResult(null);
-    if (!searchQuery.trim()) return;
-    if (searchQuery.trim() === username) {
-      setSearchError("You cannot add yourself.");
-      return;
-    }
-    const { data } = await supabase
-      .from("profiles")
-      .select("*")
-      .eq("username", searchQuery.trim())
+  async function createRoom() {
+    const name = newRoomName.trim();
+    if (!name) return;
+    const { data, error } = await supabase
+      .from("rooms")
+      .insert({
+        name,
+        created_by: user.id,
+        is_private: newRoomPrivate,
+      })
+      .select()
       .single();
-    if (!data) {
-      setSearchError("No user found.");
-      return;
-    }
-    const { data: existing } = await supabase
-      .from("friendships")
-      .select("*")
-      .or(
-        `and(from_user.eq.${currentUser.id},to_user.eq.${data.id}),and(from_user.eq.${data.id},to_user.eq.${currentUser.id})`,
-      )
-      .single();
-    if (existing) {
-      if (existing.status === "accepted") setSearchError("Already friends.");
-      else if (existing.status === "pending")
-        setSearchError("Request pending.");
-      else if (existing.status === "blocked") setSearchError("Cannot send.");
-      return;
-    }
-    setSearchResult(data);
-  }
-
-  async function sendRequest(toUser) {
-    const { error } = await supabase.from("friendships").insert({
-      from_user: currentUser.id,
-      to_user: toUser.id,
-      from_username: username,
-      to_username: toUser.username,
-      status: "pending",
-    });
-    if (!error) {
-      setSearchResult(null);
-      setSearchQuery("");
-      setSearchError("Request sent!");
+    if (!error && data) {
+      setRooms((prev) => [...prev, data]);
+      setActiveRoom(data);
+      setNewRoomName("");
+      setNewRoomPrivate(false);
+      setShowNewRoom(false);
+      setView("chat");
     }
   }
 
-  async function acceptRequest(id) {
-    await supabase
-      .from("friendships")
-      .update({ status: "accepted" })
-      .eq("id", id);
-  }
-
-  async function declineRequest(id) {
-    await supabase
-      .from("friendships")
-      .update({ status: "declined" })
-      .eq("id", id);
-  }
-
-  async function blockUser(id) {
-    await supabase
-      .from("friendships")
-      .update({ status: "blocked" })
-      .eq("id", id);
-  }
-
-  // ── Message actions ──────────────────────────────────
-  async function sendDM(e) {
+  async function sendMessage(e) {
     e.preventDefault();
     const content = text.trim();
-    if (!content || !activeChatRoomId) return;
+    if (!content || !activeRoom) return;
     setText("");
     const msgData = {
       content,
       username,
-      user_id: currentUser.id,
-      room_id: activeChatRoomId,
+      user_id: user.id,
+      room_id: activeRoom.id,
     };
     if (replyTo) {
       msgData.reply_to = replyTo.id;
@@ -399,46 +348,47 @@ const DirectMessages = forwardRef(function DirectMessages(
       msgData.reply_to_username = replyTo.username;
       setReplyTo(null);
     }
-    await supabase.from("direct_messages").insert(msgData);
-    await supabase.from("typing").delete().eq("user_id", currentUser.id);
+    const { error } = await supabase.from("messages").insert(msgData);
+    if (error) setText(content);
+    await supabase.from("typing").delete().eq("user_id", user.id);
   }
 
-  async function handleDMTyping() {
-    if (!activeChatRoomId) return;
+  async function handleTyping() {
+    if (!activeRoom) return;
     await supabase.from("typing").upsert({
-      user_id: currentUser.id,
+      user_id: user.id,
       username,
-      room_id: activeChatRoomId,
+      room_id: activeRoom.id,
       typing_at: new Date().toISOString(),
     });
   }
 
-  async function addDMReaction(mid, emoji) {
-    const existing = (reactions[mid] || []).find(
-      (r) => r.user_id === currentUser.id && r.emoji === emoji,
+  async function addReaction(messageId, emoji) {
+    const existing = (reactions[messageId] || []).find(
+      (r) => r.user_id === user.id && r.emoji === emoji,
     );
     if (existing) {
       await supabase.from("reactions").delete().eq("id", existing.id);
     } else {
       await supabase.from("reactions").insert({
-        message_id: mid,
-        user_id: currentUser.id,
+        message_id: messageId,
+        user_id: user.id,
         username,
         emoji,
       });
     }
   }
 
-  async function handleDMFileUpload() {
+  async function handleFileUpload() {
     const input = document.createElement("input");
     input.type = "file";
     input.accept =
-      "image/*,video/*,audio/*,.pdf,.txt,.doc,.docx,.zip,.rar,.7z,.py,.js,.html,.css,.json,.xml,.md,.rtf";
+      "image/*,video/*,audio/*,.pdf,.txt,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.zip,.rar,.7z,.py,.js,.html,.css,.json,.xml,.md,.rtf";
     input.onchange = (e) => {
       const file = e.target.files[0];
       if (!file) return;
       if (file.size > 25 * 1024 * 1024) {
-        alert("Max 25MB.");
+        alert("File too large. Maximum 25MB.");
         return;
       }
       setPendingFile(file);
@@ -446,272 +396,813 @@ const DirectMessages = forwardRef(function DirectMessages(
     input.click();
   }
 
-  async function confirmDMFileUpload(file, caption) {
-    if (!file || !activeChatRoomId) return;
+  async function confirmFileUpload(file, caption) {
+    if (!file || !activeRoom) return;
     setPendingFile(null);
     const ext = file.name.split(".").pop();
-    const un = `${Date.now()}_${Math.random()
+    const uniqueName = `${Date.now()}_${Math.random()
       .toString(36)
       .substring(7)}.${ext}`;
-    const { error: ue } = await supabase.storage
+    const { error: uploadError } = await supabase.storage
       .from("attachments")
-      .upload(un, file);
-    if (ue) {
-      alert("Upload failed.");
+      .upload(uniqueName, file);
+    if (uploadError) {
+      alert("Upload failed: " + uploadError.message);
       return;
     }
-    const { data: ud } = supabase.storage.from("attachments").getPublicUrl(un);
-    await supabase.from("direct_messages").insert({
+    const { data: urlData } = supabase.storage
+      .from("attachments")
+      .getPublicUrl(uniqueName);
+    await supabase.from("messages").insert({
       content: caption || "",
       username,
-      user_id: currentUser.id,
-      room_id: activeChatRoomId,
-      file_url: ud.publicUrl,
+      user_id: user.id,
+      room_id: activeRoom.id,
+      file_url: urlData.publicUrl,
       file_name: file.name,
       file_type: file.type,
     });
   }
 
-  async function editDMMessage(msg, nc) {
-    await supabase
-      .from("direct_messages")
-      .update({ content: nc, edited: true })
-      .eq("id", msg.id);
-  }
-
-  async function deleteDMMessage(id) {
-    await supabase.from("direct_messages").delete().eq("id", id);
-  }
-
-  async function pinDMMessage(msg) {
-    await supabase
-      .from("direct_messages")
-      .update({
-        pinned: !msg.pinned,
-        pinned_by: !msg.pinned ? username : null,
-      })
-      .eq("id", msg.id);
-  }
-
-  function handleDMMessageMenu(e, msg) {
-    if (e.preventDefault) e.preventDefault();
-    if (e.stopPropagation) e.stopPropagation();
-    setMessageMenu({
-      message: msg,
-      x: Math.min(e.clientX || 0, window.innerWidth - 240),
-      y: Math.min(e.clientY || 0, window.innerHeight - 320),
+  function handleRightClick(e, room) {
+    e.preventDefault();
+    setContextMenu({
+      room,
+      x: Math.min(e.clientX, window.innerWidth - 260),
+      y: Math.min(e.clientY, window.innerHeight - 320),
     });
   }
 
-  // ════════════════════════════════════════════════════
-  // ACTIVE DM CHAT VIEW
-  // ════════════════════════════════════════════════════
-  if (activeChat) {
-    const fn = getFriendName(activeChat);
+  function handleMessageRightClick(e, msg) {
+    e.preventDefault();
+    setMessageMenu({
+      message: msg,
+      x: Math.min(e.clientX, window.innerWidth - 240),
+      y: Math.min(e.clientY, window.innerHeight - 320),
+    });
+  }
 
-    return (
-      <div
-        style={{
-          flex: 1,
-          display: "flex",
-          flexDirection: "column",
-          backgroundColor: "#000000",
-          maxHeight: "100%",
-          overflow: "hidden",
-        }}
-      >
-        {/* ── Header ── */}
+  async function refreshMessages() {
+    if (!activeRoom) return;
+    const { data } = await supabase
+      .from("messages")
+      .select("*")
+      .eq("room_id", activeRoom.id)
+      .order("created_at", { ascending: true })
+      .limit(100);
+    if (data) setMessages(data);
+  }
+
+  async function handleLogout() {
+    await supabase
+      .from("presence")
+      .update({
+        status: "offline",
+        last_seen: new Date().toISOString(),
+      })
+      .eq("user_id", user.id);
+    await supabase.auth.signOut();
+  }
+
+  function formatTime(ts) {
+    const d = new Date(ts);
+    return `${d.getHours().toString().padStart(2, "0")}:${d
+      .getMinutes()
+      .toString()
+      .padStart(2, "0")}`;
+  }
+
+  function getDateDivider(msg, prev) {
+    const d = new Date(msg.created_at).toLocaleDateString();
+    if (!prev) return d;
+    return d !== new Date(prev.created_at).toLocaleDateString() ? d : null;
+  }
+
+  function groupReactionData(msgId) {
+    return Object.entries(
+      (reactions[msgId] || []).reduce((acc, r) => {
+        acc[r.emoji] = acc[r.emoji] || {
+          count: 0,
+          users: [],
+          hasOwn: false,
+        };
+        acc[r.emoji].count++;
+        acc[r.emoji].users.push(r.username);
+        if (r.user_id === user.id) acc[r.emoji].hasOwn = true;
+        return acc;
+      }, {}),
+    );
+  }
+
+  const pinnedCount = messages.filter((m) => m.pinned).length;
+
+  return (
+    <div
+      style={{
+        height: "100vh",
+        width: "100vw",
+        backgroundColor: "#000000",
+        display: "flex",
+        flexDirection: isMobile ? "column" : "row",
+        fontFamily: "Segoe UI, Arial, sans-serif",
+        overflow: "hidden",
+        position: "fixed",
+        top: 0,
+        left: 0,
+      }}
+    >
+      {/* ── Desktop Sidebar ── */}
+      {!isMobile && (
         <div
           style={{
-            padding: isMobile ? "12px 16px" : "20px 30px",
-            borderBottom: "1px solid #0d0d1a",
-            backgroundColor: "#020205",
+            width: "220px",
+            minWidth: "220px",
+            backgroundColor: "#050508",
+            borderRight: "1px solid #0d0d1a",
             display: "flex",
-            alignItems: "center",
-            gap: "12px",
-            flexShrink: 0,
+            flexDirection: "column",
+            padding: "30px 20px",
+            position: "relative",
+            height: "100vh",
+            overflowY: "auto",
           }}
         >
-          <button
-            onClick={closeChat}
+          <div
             style={{
-              background: "transparent",
-              border: "1px solid #1a1a3a",
-              borderRadius: "6px",
-              color: "#9B30FF",
-              padding: "6px 12px",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              gap: "4px",
-              fontSize: "12px",
+              position: "absolute",
+              top: 0,
+              left: 0,
+              right: 0,
+              height: "2px",
+              background:
+                "linear-gradient(90deg, transparent, #9B30FF, #00BFFF, transparent)",
             }}
-          >
-            <ArrowLeft size={14} /> BACK
-          </button>
+          />
+          <div style={{ marginBottom: "30px" }}>
+            <div
+              style={{
+                fontFamily: "'Mephisto', sans-serif",
+                fontSize: "22px",
+                fontWeight: "900",
+                letterSpacing: "6px",
+                background: "linear-gradient(135deg, #9B30FF, #00BFFF)",
+                WebkitBackgroundClip: "text",
+                WebkitTextFillColor: "transparent",
+                backgroundClip: "text",
+              }}
+            >
+              THE VOID
+            </div>
+            <div
+              style={{
+                color: "#2a2a3a",
+                fontSize: "9px",
+                letterSpacing: "2px",
+                marginTop: "4px",
+              }}
+            >
+              V2.0
+            </div>
+          </div>
 
           <div
             style={{
-              width: "36px",
-              height: "36px",
-              borderRadius: "50%",
-              background: "linear-gradient(135deg, #4B0082, #00BFFF)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "white",
-              fontSize: "14px",
-              fontWeight: "700",
+              padding: "12px 16px",
+              backgroundColor: "#0a0a15",
+              borderRadius: "8px",
+              border: "1px solid #1a1a3a",
+              marginBottom: "20px",
             }}
           >
-            {fn.charAt(0).toUpperCase()}
-          </div>
-
-          <div style={{ flex: 1 }}>
             <div
               style={{
-                color: "#ffffff",
-                fontSize: "15px",
-                fontWeight: "600",
-                letterSpacing: "1px",
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+                marginBottom: "4px",
               }}
             >
-              {fn}
+              <div
+                style={{
+                  width: "8px",
+                  height: "8px",
+                  borderRadius: "50%",
+                  backgroundColor: "#00ff00",
+                  boxShadow: "0 0 6px #00ff00",
+                }}
+              />
+              <div
+                style={{
+                  color: "#9B30FF",
+                  fontSize: "13px",
+                  fontWeight: "600",
+                  letterSpacing: "1px",
+                }}
+              >
+                {username}
+              </div>
             </div>
             <div
               style={{
                 color: "#2a2a3a",
                 fontSize: "10px",
                 letterSpacing: "1px",
+                paddingLeft: "16px",
               }}
             >
-              PRIVATE TRANSMISSION
+              ONLINE
             </div>
           </div>
 
-          {/* ── Search & Pin buttons ── */}
-          <div style={{ display: "flex", gap: "8px" }}>
-            <button
-              onClick={() => {
-                setShowDMSearch((prev) => !prev);
-                setShowDMPinned(false);
-              }}
-              title="Search Messages"
-              style={{
-                background: showDMSearch
-                  ? "rgba(155,48,255,0.15)"
-                  : "transparent",
-                border: "1px solid",
-                borderColor: showDMSearch ? "#9B30FF" : "#1a1a3a",
-                borderRadius: "6px",
-                color: showDMSearch ? "#9B30FF" : "#4a4a6a",
-                padding: "6px 10px",
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                transition: "all 0.2s",
-              }}
-            >
-              <SearchIcon size={15} />
-            </button>
-            <button
-              onClick={() => {
-                setShowDMPinned((prev) => !prev);
-                setShowDMSearch(false);
-              }}
-              title="Pinned Messages"
-              style={{
-                background: showDMPinned
-                  ? "rgba(155,48,255,0.15)"
-                  : "transparent",
-                border: "1px solid",
-                borderColor: showDMPinned ? "#9B30FF" : "#1a1a3a",
-                borderRadius: "6px",
-                color: showDMPinned ? "#9B30FF" : "#4a4a6a",
-                padding: "6px 10px",
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                transition: "all 0.2s",
-              }}
-            >
-              <Pin size={15} />
-            </button>
-          </div>
-        </div>
-
-        {/* ── Messages ── */}
-        <div
-          ref={msgContainerRef}
-          style={{
-            flex: 1,
-            overflowY: "auto",
-            padding: isMobile ? "12px 12px 140px 12px" : "20px 30px",
-            display: "flex",
-            flexDirection: "column",
-            gap: "4px",
-          }}
-        >
-          {messages.length === 0 && (
-            <div
-              style={{
-                textAlign: "center",
-                color: "#2a2a3a",
-                fontSize: "13px",
-                letterSpacing: "2px",
-                marginTop: "40px",
-              }}
-            >
-              START YOUR PRIVATE TRANSMISSION
-            </div>
-          )}
-          {messages.map((msg, i) => {
-            const isOwn = msg.user_id === currentUser.id;
-            const showName =
-              i === 0 || messages[i - 1]?.user_id !== msg.user_id;
-            const dd = getDateDivider(msg, messages[i - 1]);
-            return (
-              <div key={msg.id}>
-                <DateDivider date={dd} />
-                <MessageBubble
-                  msg={msg}
-                  isOwn={isOwn}
-                  showName={showName}
-                  isMobile={isMobile}
-                  reactions={reactions[msg.id] || []}
-                  onReaction={addDMReaction}
-                  onContextMenu={(e) => handleDMMessageMenu(e, msg)}
-                  formatTime={formatTime}
-                  groupReactionData={groupReactionData(msg.id)}
-                />
-              </div>
-            );
-          })}
-          <div ref={bottomRef} />
-        </div>
-
-        {/* ── Typing indicator ── */}
-        {typingUsers.length > 0 && (
           <div
             style={{
-              padding: "4px 30px",
-              color: "#4a4a6a",
-              fontSize: "12px",
-              fontStyle: "italic",
-              flexShrink: 0,
+              color: "#2a2a3a",
+              fontSize: "10px",
+              letterSpacing: "2px",
+              marginBottom: "8px",
             }}
           >
-            {typingUsers.map((t) => t.username).join(", ")} is typing...
+            ONLINE — {onlineUsers.length}
           </div>
-        )}
-
-        {/* ── Reply bar ── */}
-        {replyTo && (
           <div
             style={{
-              padding: "10px 30px",
+              marginBottom: "16px",
+              maxHeight: "80px",
+              overflowY: "auto",
+            }}
+          >
+            {onlineUsers.map((u) => (
+              <div
+                key={u.user_id}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: "4px 8px",
+                  fontSize: "11px",
+                  color: u.user_id === user.id ? "#9B30FF" : "#4a4a6a",
+                }}
+              >
+                <div
+                  style={{
+                    width: "6px",
+                    height: "6px",
+                    borderRadius: "50%",
+                    backgroundColor: "#00ff00",
+                  }}
+                />
+                {u.username}
+              </div>
+            ))}
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              marginBottom: "8px",
+            }}
+          >
+            <div
+              style={{
+                color: "#2a2a3a",
+                fontSize: "10px",
+                letterSpacing: "2px",
+              }}
+            >
+              CHANNELS
+            </div>
+            <button
+              onClick={() => setShowNewRoom(!showNewRoom)}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: "#9B30FF",
+                cursor: "pointer",
+                padding: "0 4px",
+                display: "flex",
+                alignItems: "center",
+              }}
+            >
+              <Plus size={16} />
+            </button>
+          </div>
+
+          {showNewRoom && (
+            <div style={{ marginBottom: "8px", paddingRight: "4px" }}>
+              <div
+                style={{
+                  display: "flex",
+                  gap: "6px",
+                  marginBottom: "6px",
+                  alignItems: "center",
+                }}
+              >
+                <input
+                  value={newRoomName}
+                  onChange={(e) => setNewRoomName(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && createRoom()}
+                  placeholder="room name"
+                  style={{
+                    flex: 1,
+                    padding: "6px 10px",
+                    backgroundColor: "#0a0a15",
+                    border: "1px solid #1a1a3a",
+                    borderRadius: "4px",
+                    color: "#ffffff",
+                    fontSize: "11px",
+                    outline: "none",
+                    minWidth: 0,
+                    boxSizing: "border-box",
+                  }}
+                />
+                <button
+                  onClick={createRoom}
+                  style={{
+                    width: "28px",
+                    height: "28px",
+                    border: "none",
+                    borderRadius: "4px",
+                    background: "#9B30FF",
+                    color: "white",
+                    fontSize: "16px",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexShrink: 0,
+                  }}
+                >
+                  <Plus size={14} />
+                </button>
+              </div>
+              <div style={{ display: "flex", gap: "4px" }}>
+                <button
+                  onClick={() => setNewRoomPrivate(false)}
+                  style={{
+                    flex: 1,
+                    padding: "4px",
+                    borderRadius: "4px",
+                    fontSize: "10px",
+                    cursor: "pointer",
+                    letterSpacing: "1px",
+                    border: "1px solid",
+                    borderColor: !newRoomPrivate ? "#00ff00" : "#1a1a3a",
+                    backgroundColor: !newRoomPrivate
+                      ? "rgba(0,255,0,0.1)"
+                      : "transparent",
+                    color: !newRoomPrivate ? "#00ff00" : "#2a2a3a",
+                  }}
+                >
+                  PUBLIC
+                </button>
+                <button
+                  onClick={() => setNewRoomPrivate(true)}
+                  style={{
+                    flex: 1,
+                    padding: "4px",
+                    borderRadius: "4px",
+                    fontSize: "10px",
+                    cursor: "pointer",
+                    letterSpacing: "1px",
+                    border: "1px solid",
+                    borderColor: newRoomPrivate ? "#ff8c00" : "#1a1a3a",
+                    backgroundColor: newRoomPrivate
+                      ? "rgba(255,140,0,0.1)"
+                      : "transparent",
+                    color: newRoomPrivate ? "#ff8c00" : "#2a2a3a",
+                  }}
+                >
+                  PRIVATE
+                </button>
+              </div>
+            </div>
+          )}
+
+          {rooms.map((room) => (
+            <div
+              key={room.id}
+              onClick={() => switchRoom(room)}
+              onContextMenu={(e) => handleRightClick(e, room)}
+              onTouchStart={(e) => {
+                const t = setTimeout(() => {
+                  handleRightClick(
+                    {
+                      preventDefault: () => {},
+                      clientX: e.touches[0].clientX,
+                      clientY: e.touches[0].clientY,
+                    },
+                    room,
+                  );
+                }, 500);
+                e.currentTarget.dataset.longpress = t;
+              }}
+              onTouchEnd={(e) =>
+                clearTimeout(Number(e.currentTarget.dataset.longpress))
+              }
+              onTouchMove={(e) =>
+                clearTimeout(Number(e.currentTarget.dataset.longpress))
+              }
+              style={{
+                padding: "8px 14px",
+                borderRadius: "6px",
+                border: "1px solid",
+                backgroundColor:
+                  activeRoom?.id === room.id && view === "chat"
+                    ? `${room.color || "#9B30FF"}15`
+                    : "transparent",
+                borderColor:
+                  activeRoom?.id === room.id && view === "chat"
+                    ? `${room.color || "#9B30FF"}40`
+                    : "transparent",
+                color:
+                  activeRoom?.id === room.id && view === "chat"
+                    ? room.color || "#9B30FF"
+                    : "#2a2a3a",
+                fontSize: "13px",
+                letterSpacing: "1px",
+                marginBottom: "2px",
+                cursor: "pointer",
+                transition: "all 0.2s",
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                justifyContent: "space-between",
+              }}
+            >
+              <span
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                }}
+              >
+                {room.is_private ? <Lock size={11} /> : <Hash size={11} />}
+                {room.name}
+              </span>
+              {unreadCounts[room.id] > 0 && activeRoom?.id !== room.id && (
+                <span
+                  style={{
+                    backgroundColor: "#9B30FF",
+                    color: "white",
+                    fontSize: "10px",
+                    fontWeight: "700",
+                    padding: "2px 6px",
+                    borderRadius: "10px",
+                    minWidth: "18px",
+                    textAlign: "center",
+                  }}
+                >
+                  {unreadCounts[room.id] > 99 ? "99+" : unreadCounts[room.id]}
+                </span>
+              )}
+            </div>
+          ))}
+
+          <div
+            style={{
+              color: "#2a2a3a",
+              fontSize: "10px",
+              letterSpacing: "2px",
+              marginBottom: "8px",
+              marginTop: "16px",
+            }}
+          >
+            DIRECT MESSAGES
+          </div>
+          <div
+            onClick={() => handleViewChange("dms")}
+            style={{
+              padding: "8px 14px",
+              borderRadius: "6px",
+              border: "1px solid",
+              backgroundColor:
+                view === "dms" ? "rgba(0,191,255,0.1)" : "transparent",
+              borderColor:
+                view === "dms" ? "rgba(0,191,255,0.2)" : "transparent",
+              color: view === "dms" ? "#00BFFF" : "#2a2a3a",
+              fontSize: "13px",
+              letterSpacing: "1px",
+              marginBottom: "auto",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              gap: "6px",
+            }}
+          >
+            <MessageCircle size={13} /> messages
+          </div>
+
+          <button
+            onClick={() => handleViewChange("settings")}
+            style={{
+              width: "100%",
+              padding: "10px",
+              border: "1px solid",
+              backgroundColor:
+                view === "settings" ? "rgba(155,48,255,0.1)" : "transparent",
+              borderColor:
+                view === "settings" ? "rgba(155,48,255,0.2)" : "#1a1a3a",
+              borderRadius: "8px",
+              color: view === "settings" ? "#9B30FF" : "#2a2a3a",
+              fontSize: "12px",
+              letterSpacing: "2px",
+              cursor: "pointer",
+              marginTop: "8px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "6px",
+            }}
+          >
+            <Settings size={14} /> SETTINGS
+          </button>
+
+          <button
+            onClick={handleLogout}
+            style={{
+              padding: "12px",
+              backgroundColor: "transparent",
+              border: "1px solid #1a0020",
+              borderRadius: "8px",
+              color: "#3a1a3a",
+              fontSize: "12px",
+              letterSpacing: "2px",
+              cursor: "pointer",
+              marginTop: "12px",
+              width: "100%",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "6px",
+            }}
+          >
+            <LogOut size={14} /> DISCONNECT
+          </button>
+        </div>
+      )}
+
+      {/* ── Mobile Header ── */}
+      {isMobile && (
+        <div style={{ flexShrink: 0, width: "100%" }}>
+          <div
+            style={{
+              padding: "12px 16px",
               backgroundColor: "#050508",
-              borderTop: "1px solid #1a1a3a",
+              borderBottom: "1px solid #0d0d1a",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+            }}
+          >
+            <div
+              style={{
+                fontFamily: "'Mephisto', sans-serif",
+                fontSize: "18px",
+                fontWeight: "900",
+                letterSpacing: "4px",
+                background: "linear-gradient(135deg, #9B30FF, #00BFFF)",
+                WebkitBackgroundClip: "text",
+                WebkitTextFillColor: "transparent",
+                backgroundClip: "text",
+              }}
+            >
+              THE VOID
+            </div>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+              }}
+            >
+              <div
+                style={{
+                  width: "6px",
+                  height: "6px",
+                  borderRadius: "50%",
+                  backgroundColor: "#00ff00",
+                }}
+              />
+              <span
+                style={{
+                  color: "#9B30FF",
+                  fontSize: "12px",
+                  letterSpacing: "1px",
+                }}
+              >
+                {username}
+              </span>
+            </div>
+          </div>
+          {view === "chat" && (
+            <div
+              style={{
+                padding: "8px 12px",
+                backgroundColor: "#020205",
+                borderBottom: "1px solid #0d0d1a",
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+                overflowX: "auto",
+              }}
+            >
+              {rooms.map((room) => (
+                <button
+                  key={room.id}
+                  onClick={() => switchRoom(room)}
+                  onTouchStart={(e) => {
+                    const t = setTimeout(() => {
+                      handleRightClick(
+                        {
+                          preventDefault: () => {},
+                          clientX: e.touches[0].clientX,
+                          clientY: e.touches[0].clientY,
+                        },
+                        room,
+                      );
+                    }, 500);
+                    e.currentTarget.dataset.longpress = t;
+                  }}
+                  onTouchEnd={(e) =>
+                    clearTimeout(Number(e.currentTarget.dataset.longpress))
+                  }
+                  onTouchMove={(e) =>
+                    clearTimeout(Number(e.currentTarget.dataset.longpress))
+                  }
+                  style={{
+                    padding: "6px 14px",
+                    borderRadius: "20px",
+                    border: "1px solid",
+                    borderColor:
+                      activeRoom?.id === room.id
+                        ? room.color || "#9B30FF"
+                        : "#1a1a3a",
+                    backgroundColor:
+                      activeRoom?.id === room.id
+                        ? `${room.color || "#9B30FF"}20`
+                        : "transparent",
+                    color:
+                      activeRoom?.id === room.id
+                        ? room.color || "#9B30FF"
+                        : "#4a4a6a",
+                    fontSize: "12px",
+                    letterSpacing: "1px",
+                    cursor: "pointer",
+                    whiteSpace: "nowrap",
+                    flexShrink: 0,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "4px",
+                    position: "relative",
+                  }}
+                >
+                  {room.is_private ? <Lock size={10} /> : <Hash size={10} />}{" "}
+                  {room.name}
+                  {unreadCounts[room.id] > 0 && activeRoom?.id !== room.id && (
+                    <span
+                      style={{
+                        backgroundColor: "#9B30FF",
+                        color: "white",
+                        fontSize: "9px",
+                        fontWeight: "700",
+                        padding: "1px 5px",
+                        borderRadius: "8px",
+                        marginLeft: "4px",
+                      }}
+                    >
+                      {unreadCounts[room.id] > 99
+                        ? "99+"
+                        : unreadCounts[room.id]}
+                    </span>
+                  )}
+                </button>
+              ))}
+              <button
+                onClick={() => setShowNewRoom(!showNewRoom)}
+                style={{
+                  padding: "6px 12px",
+                  borderRadius: "20px",
+                  border: "1px solid #1a1a3a",
+                  backgroundColor: "transparent",
+                  color: "#9B30FF",
+                  cursor: "pointer",
+                  flexShrink: 0,
+                  display: "flex",
+                  alignItems: "center",
+                }}
+              >
+                <Plus size={16} />
+              </button>
+            </div>
+          )}
+          {view === "chat" && showNewRoom && (
+            <div
+              style={{
+                padding: "8px 12px",
+                backgroundColor: "#020205",
+                borderBottom: "1px solid #0d0d1a",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  gap: "8px",
+                  marginBottom: "6px",
+                }}
+              >
+                <input
+                  value={newRoomName}
+                  onChange={(e) => setNewRoomName(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && createRoom()}
+                  placeholder="Channel name..."
+                  style={{
+                    flex: 1,
+                    padding: "8px 14px",
+                    backgroundColor: "#0a0a15",
+                    border: "1px solid #1a1a3a",
+                    borderRadius: "20px",
+                    color: "#ffffff",
+                    fontSize: "13px",
+                    outline: "none",
+                  }}
+                />
+                <button
+                  onClick={createRoom}
+                  style={{
+                    padding: "8px 16px",
+                    border: "none",
+                    borderRadius: "20px",
+                    background: "#9B30FF",
+                    color: "white",
+                    fontSize: "12px",
+                    cursor: "pointer",
+                  }}
+                >
+                  ADD
+                </button>
+              </div>
+              <div style={{ display: "flex", gap: "6px" }}>
+                <button
+                  onClick={() => setNewRoomPrivate(false)}
+                  style={{
+                    flex: 1,
+                    padding: "6px",
+                    borderRadius: "20px",
+                    fontSize: "11px",
+                    cursor: "pointer",
+                    border: "1px solid",
+                    borderColor: !newRoomPrivate ? "#00ff00" : "#1a1a3a",
+                    backgroundColor: !newRoomPrivate
+                      ? "rgba(0,255,0,0.1)"
+                      : "transparent",
+                    color: !newRoomPrivate ? "#00ff00" : "#2a2a3a",
+                  }}
+                >
+                  PUBLIC
+                </button>
+                <button
+                  onClick={() => setNewRoomPrivate(true)}
+                  style={{
+                    flex: 1,
+                    padding: "6px",
+                    borderRadius: "20px",
+                    fontSize: "11px",
+                    cursor: "pointer",
+                    border: "1px solid",
+                    borderColor: newRoomPrivate ? "#ff8c00" : "#1a1a3a",
+                    backgroundColor: newRoomPrivate
+                      ? "rgba(255,140,0,0.1)"
+                      : "transparent",
+                    color: newRoomPrivate ? "#ff8c00" : "#2a2a3a",
+                  }}
+                >
+                  PRIVATE
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Main Content ── */}
+      {view === "chat" ? (
+        <div
+          style={{
+            flex: 1,
+            display: "flex",
+            flexDirection: "column",
+            height: "100vh",
+            overflow: "hidden",
+          }}
+        >
+          {/* Channel header */}
+          <div
+            style={{
+              padding: isMobile ? "12px 16px" : "20px 30px",
+              borderBottom: "1px solid #0d0d1a",
+              backgroundColor: "#020205",
               display: "flex",
               alignItems: "center",
               justifyContent: "space-between",
@@ -719,888 +1210,418 @@ const DirectMessages = forwardRef(function DirectMessages(
             }}
           >
             <div>
-              <div style={{ color: "#9B30FF", fontSize: "11px" }}>
-                Replying to {replyTo.username}
-              </div>
               <div
                 style={{
-                  color: "#4a4a6a",
-                  fontSize: "12px",
-                  overflow: "hidden",
-                  whiteSpace: "nowrap",
-                  textOverflow: "ellipsis",
-                  maxWidth: "300px",
-                }}
-              >
-                {replyTo.content}
-              </div>
-            </div>
-            <button
-              onClick={() => setReplyTo(null)}
-              style={{
-                background: "transparent",
-                border: "none",
-                color: "#ff4444",
-                fontSize: "18px",
-                cursor: "pointer",
-              }}
-            >
-              ×
-            </button>
-          </div>
-        )}
-
-        {/* ── Input bar ── */}
-        <div
-          style={{
-            padding: isMobile ? "10px 12px" : "20px 30px",
-            borderTop: "1px solid #0d0d1a",
-            backgroundColor: "#020205",
-            flexShrink: 0,
-            position: isMobile ? "fixed" : "relative",
-            bottom: isMobile ? "56px" : "auto",
-            left: isMobile ? 0 : "auto",
-            right: isMobile ? 0 : "auto",
-            zIndex: isMobile ? 50 : "auto",
-          }}
-        >
-          <form
-            onSubmit={sendDM}
-            style={{
-              display: "flex",
-              gap: "8px",
-              alignItems: "center",
-            }}
-          >
-            <input
-              value={text}
-              onChange={(e) => {
-                setText(e.target.value);
-                handleDMTyping();
-              }}
-              placeholder={`Message ${fn}...`}
-              style={{
-                flex: 1,
-                padding: isMobile ? "12px 14px" : "14px 20px",
-                backgroundColor: "#0a0a15",
-                border: "1px solid #1a1a3a",
-                borderRadius: "8px",
-                color: "#ffffff",
-                fontSize: isMobile ? "13px" : "14px",
-                outline: "none",
-              }}
-            />
-            <button
-              type="button"
-              onClick={handleDMFileUpload}
-              style={{
-                padding: isMobile ? "12px" : "14px 16px",
-                border: "1px solid #1a1a3a",
-                borderRadius: "8px",
-                backgroundColor: "transparent",
-                color: "#9B30FF",
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                flexShrink: 0,
-              }}
-            >
-              <Paperclip size={18} />
-            </button>
-            <button
-              type="submit"
-              style={{
-                padding: isMobile ? "12px 16px" : "14px 28px",
-                border: "none",
-                borderRadius: "8px",
-                background: "linear-gradient(135deg, #4B0082, #9B30FF)",
-                color: "white",
-                fontSize: "13px",
-                fontWeight: "700",
-                letterSpacing: "2px",
-                cursor: "pointer",
-                boxShadow: "0 0 20px rgba(155,48,255,0.3)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              {isMobile ? <Send size={16} /> : "SEND"}
-            </button>
-          </form>
-        </div>
-
-        {/* ── Message Menu ── */}
-        {messageMenu && (
-          <DMMessageMenu
-            message={messageMenu.message}
-            isOwn={messageMenu.message.user_id === currentUser.id}
-            position={{ x: messageMenu.x, y: messageMenu.y }}
-            onClose={() => setMessageMenu(null)}
-            onReply={(msg) => setReplyTo(msg)}
-            onReact={(msg) => setShowEmojiPicker(msg)}
-            onEdit={editDMMessage}
-            onDelete={deleteDMMessage}
-            onPin={pinDMMessage}
-            currentUsername={username}
-          />
-        )}
-
-        {/* ── Emoji Picker ── */}
-        {showEmojiPicker && (
-          <EmojiPicker
-            onSelect={(emoji) => {
-              addDMReaction(showEmojiPicker.id, emoji);
-              setShowEmojiPicker(null);
-            }}
-            onClose={() => setShowEmojiPicker(null)}
-          />
-        )}
-
-        {/* ── File Upload ── */}
-        {pendingFile && (
-          <FileUploadPreview
-            file={pendingFile}
-            onSend={confirmDMFileUpload}
-            onCancel={() => setPendingFile(null)}
-          />
-        )}
-
-        {/* ── Search Modal ── */}
-        {showDMSearch && activeChatRoomId && (
-          <SearchMessages
-            roomId={activeChatRoomId}
-            tableName="direct_messages"
-            onClose={() => setShowDMSearch(false)}
-          />
-        )}
-
-        {/* ── Pinned Modal ── */}
-        {showDMPinned && activeChatRoomId && (
-          <PinnedMessages
-            roomId={activeChatRoomId}
-            tableName="direct_messages"
-            currentUser={currentUser}
-            onClose={() => setShowDMPinned(false)}
-          />
-        )}
-      </div>
-    );
-  }
-
-  // ════════════════════════════════════════════════════
-  // FRIENDS LIST VIEW
-  // ════════════════════════════════════════════════════
-  return (
-    <div
-      style={{
-        flex: 1,
-        display: "flex",
-        flexDirection: "column",
-        padding: "30px",
-        backgroundColor: "#000000",
-        paddingBottom: isMobile ? "80px" : "30px",
-        overflowY: "auto",
-      }}
-    >
-      <div
-        style={{
-          fontSize: "22px",
-          fontWeight: "700",
-          letterSpacing: "4px",
-          background: "linear-gradient(135deg, #9B30FF, #00BFFF)",
-          WebkitBackgroundClip: "text",
-          WebkitTextFillColor: "transparent",
-          backgroundClip: "text",
-          marginBottom: "6px",
-        }}
-      >
-        DIRECT MESSAGES
-      </div>
-      <div
-        style={{
-          height: "1px",
-          background: "linear-gradient(90deg, #9B30FF, #00BFFF, transparent)",
-          marginTop: "10px",
-          marginBottom: "20px",
-        }}
-      />
-
-      {/* ── Tabs ── */}
-      <div style={{ display: "flex", gap: "4px", marginBottom: "24px" }}>
-        {[
-          { key: "friends", label: "FRIENDS" },
-          {
-            key: "requests",
-            label: `REQUESTS${notification > 0 ? ` (${notification})` : ""}`,
-          },
-          { key: "search", label: "ADD FRIEND" },
-        ].map((t) => (
-          <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
-            style={{
-              padding: "10px 20px",
-              borderRadius: "6px",
-              border: "1px solid",
-              borderColor: tab === t.key ? "#9B30FF" : "#1a1a3a",
-              backgroundColor:
-                tab === t.key ? "rgba(155,48,255,0.1)" : "transparent",
-              color: tab === t.key ? "#9B30FF" : "#2a2a3a",
-              fontSize: "11px",
-              letterSpacing: "2px",
-              cursor: "pointer",
-            }}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      <AnimatePresence mode="wait">
-        {/* ── Friends tab ── */}
-        {tab === "friends" && (
-          <motion.div
-            key="friends"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: "8px",
-            }}
-          >
-            {friends.length === 0 && (
-              <div
-                style={{
-                  color: "#2a2a3a",
-                  fontSize: "13px",
-                  letterSpacing: "2px",
-                  textAlign: "center",
-                  marginTop: "40px",
-                }}
-              >
-                NO FRIENDS YET.
-              </div>
-            )}
-            {friends.map((f) => (
-              <button
-                key={f.id}
-                onClick={() => openChat(f)}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "12px",
-                  padding: "16px 20px",
-                  backgroundColor: "#050508",
-                  border: "1px solid #1a1a3a",
-                  borderRadius: "10px",
-                  cursor: "pointer",
-                  textAlign: "left",
-                  position: "relative",
-                }}
-              >
-                <div style={{ position: "relative" }}>
-                  <div
-                    style={{
-                      width: "40px",
-                      height: "40px",
-                      borderRadius: "50%",
-                      background: "linear-gradient(135deg, #4B0082, #00BFFF)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      color: "white",
-                      fontSize: "16px",
-                      fontWeight: "700",
-                    }}
-                  >
-                    {getFriendName(f).charAt(0).toUpperCase()}
-                  </div>
-                  {dmUnreadCounts[f.id] > 0 && (
-                    <div
-                      style={{
-                        position: "absolute",
-                        top: "-4px",
-                        right: "-4px",
-                        backgroundColor: "#ff4444",
-                        color: "white",
-                        borderRadius: "50%",
-                        width: "18px",
-                        height: "18px",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        fontSize: "10px",
-                        fontWeight: "700",
-                        border: "2px solid #000000",
-                      }}
-                    >
-                      {dmUnreadCounts[f.id] > 9 ? "9+" : dmUnreadCounts[f.id]}
-                    </div>
-                  )}
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div
-                    style={{
-                      color: "#ffffff",
-                      fontSize: "14px",
-                      fontWeight: "600",
-                    }}
-                  >
-                    {getFriendName(f)}
-                  </div>
-                  <div style={{ color: "#2a2a3a", fontSize: "11px" }}>
-                    {dmUnreadCounts[f.id] > 0
-                      ? `${dmUnreadCounts[f.id]} new message${dmUnreadCounts[f.id] > 1 ? "s" : ""}`
-                      : "Click to open DM"}
-                  </div>
-                </div>
-              </button>
-            ))}
-          </motion.div>
-        )}
-
-        {/* ── Requests tab ── */}
-        {tab === "requests" && (
-          <motion.div
-            key="requests"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: "8px",
-            }}
-          >
-            {requests.length === 0 && (
-              <div
-                style={{
-                  color: "#2a2a3a",
-                  fontSize: "13px",
-                  letterSpacing: "2px",
-                  textAlign: "center",
-                  marginTop: "40px",
-                }}
-              >
-                NO PENDING REQUESTS.
-              </div>
-            )}
-            {requests.map((r) => (
-              <div
-                key={r.id}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "12px",
-                  padding: "16px 20px",
-                  backgroundColor: "#050508",
-                  border: "1px solid #1a1a3a",
-                  borderRadius: "10px",
-                }}
-              >
-                <div
-                  style={{
-                    width: "40px",
-                    height: "40px",
-                    borderRadius: "50%",
-                    background: "linear-gradient(135deg, #4B0082, #00BFFF)",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    color: "white",
-                    fontSize: "16px",
-                    fontWeight: "700",
-                  }}
-                >
-                  {r.from_username.charAt(0).toUpperCase()}
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div
-                    style={{
-                      color: "#ffffff",
-                      fontSize: "14px",
-                      fontWeight: "600",
-                    }}
-                  >
-                    {r.from_username}
-                  </div>
-                  <div style={{ color: "#2a2a3a", fontSize: "11px" }}>
-                    Wants to connect
-                  </div>
-                </div>
-                <div style={{ display: "flex", gap: "6px" }}>
-                  <button
-                    onClick={() => acceptRequest(r.id)}
-                    style={{
-                      padding: "8px 12px",
-                      border: "none",
-                      borderRadius: "6px",
-                      background: "rgba(0,255,0,0.2)",
-                      color: "#00ff00",
-                      fontSize: "11px",
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "4px",
-                    }}
-                  >
-                    <UserCheck size={12} /> ACCEPT
-                  </button>
-                  <button
-                    onClick={() => declineRequest(r.id)}
-                    style={{
-                      padding: "8px 12px",
-                      border: "1px solid #1a1a3a",
-                      borderRadius: "6px",
-                      backgroundColor: "transparent",
-                      color: "#2a2a3a",
-                      fontSize: "11px",
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "4px",
-                    }}
-                  >
-                    <UserX size={12} /> DECLINE
-                  </button>
-                  <button
-                    onClick={() => blockUser(r.id)}
-                    style={{
-                      padding: "8px 12px",
-                      border: "none",
-                      borderRadius: "6px",
-                      background: "#440000",
-                      color: "#ff4444",
-                      fontSize: "11px",
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "4px",
-                    }}
-                  >
-                    <Ban size={12} /> BLOCK
-                  </button>
-                </div>
-              </div>
-            ))}
-          </motion.div>
-        )}
-
-        {/* ── Add Friend tab ── */}
-        {tab === "search" && (
-          <motion.div
-            key="search"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-          >
-            <div
-              style={{
-                color: "#2a2a3a",
-                fontSize: "11px",
-                letterSpacing: "2px",
-                marginBottom: "12px",
-              }}
-            >
-              ENTER EXACT USERNAME
-            </div>
-            <div
-              style={{
-                display: "flex",
-                gap: "10px",
-                marginBottom: "16px",
-              }}
-            >
-              <input
-                value={searchQuery}
-                onChange={(e) => {
-                  setSearchQuery(e.target.value);
-                  setSearchResult(null);
-                  setSearchError("");
-                }}
-                onKeyDown={(e) => e.key === "Enter" && searchUser()}
-                placeholder="Exact username..."
-                style={{
-                  flex: 1,
-                  padding: "12px 18px",
-                  backgroundColor: "#0a0a15",
-                  border: "1px solid #1a1a3a",
-                  borderRadius: "8px",
                   color: "#ffffff",
-                  fontSize: "14px",
-                  outline: "none",
-                }}
-              />
-              <button
-                onClick={searchUser}
-                style={{
-                  padding: "12px 24px",
-                  border: "none",
-                  borderRadius: "8px",
-                  background: "linear-gradient(135deg, #4B0082, #9B30FF)",
-                  color: "white",
-                  fontSize: "12px",
-                  fontWeight: "700",
+                  fontSize: isMobile ? "14px" : "16px",
+                  fontWeight: "600",
                   letterSpacing: "2px",
-                  cursor: "pointer",
                   display: "flex",
                   alignItems: "center",
                   gap: "6px",
                 }}
               >
-                <Search size={14} /> SEARCH
-              </button>
-            </div>
-            {searchError && (
+                {activeRoom?.is_private ? (
+                  <Lock size={14} />
+                ) : (
+                  <Hash size={14} />
+                )}{" "}
+                {activeRoom?.name || "loading"}
+              </div>
               <div
                 style={{
-                  color: searchError.includes("sent") ? "#00ff00" : "#ff4444",
-                  fontSize: "13px",
-                  padding: "10px 16px",
-                  borderRadius: "8px",
-                  backgroundColor: searchError.includes("sent")
-                    ? "rgba(0,255,0,0.05)"
-                    : "rgba(255,68,68,0.05)",
-                  border: `1px solid ${
-                    searchError.includes("sent")
-                      ? "rgba(0,255,0,0.2)"
-                      : "rgba(255,68,68,0.2)"
-                  }`,
+                  color: "#2a2a3a",
+                  fontSize: "11px",
+                  letterSpacing: "1px",
+                  marginTop: "2px",
                 }}
               >
-                {searchError}
+                {activeRoom?.description || "ENCRYPTED CHANNEL"}
               </div>
-            )}
-            {searchResult && (
+            </div>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+              }}
+            >
+              {pinnedCount > 0 && (
+                <button
+                  onClick={() => setShowPinned(true)}
+                  style={{
+                    background: "transparent",
+                    border: "1px solid rgba(255,215,0,0.3)",
+                    borderRadius: "6px",
+                    padding: "6px 10px",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "4px",
+                    color: "#FFD700",
+                    fontSize: "11px",
+                    letterSpacing: "1px",
+                  }}
+                >
+                  <Pin size={12} /> {pinnedCount}
+                </button>
+              )}
+              <button
+                onClick={() => setShowSearch(true)}
+                style={{
+                  background: "transparent",
+                  border: "1px solid #1a1a3a",
+                  borderRadius: "6px",
+                  padding: "6px 10px",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "4px",
+                  color: "#4a4a6a",
+                  fontSize: "11px",
+                  letterSpacing: "1px",
+                }}
+              >
+                <SearchIcon size={12} /> SEARCH
+              </button>
               <div
                 style={{
                   display: "flex",
                   alignItems: "center",
-                  gap: "12px",
-                  padding: "16px 20px",
-                  backgroundColor: "#050508",
-                  border: "1px solid #9B30FF",
-                  borderRadius: "10px",
-                  marginTop: "12px",
+                  gap: "6px",
                 }}
               >
                 <div
                   style={{
-                    width: "40px",
-                    height: "40px",
+                    width: "6px",
+                    height: "6px",
                     borderRadius: "50%",
-                    background: "linear-gradient(135deg, #4B0082, #00BFFF)",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    color: "white",
-                    fontSize: "16px",
-                    fontWeight: "700",
+                    backgroundColor: "#00BFFF",
+                    boxShadow: "0 0 6px #00BFFF",
                   }}
-                >
-                  {searchResult.username.charAt(0).toUpperCase()}
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div
-                    style={{
-                      color: "#ffffff",
-                      fontSize: "14px",
-                      fontWeight: "600",
-                    }}
-                  >
-                    {searchResult.username}
-                  </div>
-                  <div style={{ color: "#2a2a3a", fontSize: "11px" }}>
-                    User found
-                  </div>
-                </div>
-                <button
-                  onClick={() => sendRequest(searchResult)}
-                  style={{
-                    padding: "10px 20px",
-                    border: "none",
-                    borderRadius: "6px",
-                    background: "linear-gradient(135deg, #4B0082, #9B30FF)",
-                    color: "white",
-                    fontSize: "12px",
-                    fontWeight: "700",
-                    letterSpacing: "2px",
-                    cursor: "pointer",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "6px",
-                  }}
-                >
-                  <UserPlus size={14} /> ADD FRIEND
-                </button>
-              </div>
-            )}
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-});
-
-// ════════════════════════════════════════════════════
-// DM MESSAGE MENU
-// ════════════════════════════════════════════════════
-function DMMessageMenu({
-  message,
-  isOwn,
-  position,
-  onClose,
-  onReply,
-  onReact,
-  onEdit,
-  onDelete,
-  onPin,
-  currentUsername,
-}) {
-  const [view, setView] = useState("menu");
-  const [editText, setEditText] = useState(message.content);
-  const isPinned = message.pinned;
-
-  return (
-    <div
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 1000,
-        backgroundColor: "rgba(0,0,0,0.5)",
-      }}
-    >
-      <div
-        style={{
-          position: "fixed",
-          top: Math.min(position.y, window.innerHeight - 320),
-          left: Math.min(position.x, window.innerWidth - 220),
-          backgroundColor: "#0a0a15",
-          border: "1px solid #1a1a3a",
-          borderRadius: "10px",
-          padding: "8px",
-          minWidth: "200px",
-          boxShadow: "0 10px 40px rgba(0,0,0,0.8)",
-          zIndex: 1001,
-        }}
-      >
-        {view === "menu" && (
-          <>
-            <MItem
-              icon={<Reply size={14} />}
-              label="Reply"
-              onClick={() => {
-                onReply(message);
-                onClose();
-              }}
-            />
-            <MItem
-              icon={<Smile size={14} />}
-              label="React"
-              onClick={() => {
-                onReact(message);
-                onClose();
-              }}
-            />
-            <MItem
-              icon={<Copy size={14} />}
-              label="Copy"
-              onClick={() => {
-                navigator.clipboard.writeText(message.content);
-                onClose();
-              }}
-            />
-            <MItem
-              icon={<Pin size={14} />}
-              label={isPinned ? "Unpin Message" : "Pin Message"}
-              onClick={() => {
-                onPin(message);
-                onClose();
-              }}
-            />
-            {isOwn && (
-              <>
+                />
                 <div
                   style={{
-                    height: "1px",
-                    background: "#1a1a3a",
-                    margin: "4px 0",
+                    color: "#2a2a3a",
+                    fontSize: "11px",
+                    letterSpacing: "1px",
                   }}
-                />
-                <MItem
-                  icon={<Pencil size={14} />}
-                  label="Edit"
-                  onClick={() => setView("edit")}
-                />
-                <MItem
-                  icon={<Trash2 size={14} />}
-                  label="Delete"
-                  danger
-                  onClick={() => setView("delete")}
-                />
-              </>
+                >
+                  LIVE
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Messages */}
+          <div
+            ref={messagesContainerRef}
+            style={{
+              flex: 1,
+              overflowY: "auto",
+              padding: isMobile ? "12px 12px 140px 12px" : "20px 30px",
+              display: "flex",
+              flexDirection: "column",
+              gap: "4px",
+            }}
+          >
+            {loading && (
+              <div
+                style={{
+                  textAlign: "center",
+                  color: "#2a2a3a",
+                  fontSize: "13px",
+                  letterSpacing: "2px",
+                  marginTop: "40px",
+                }}
+              >
+                LOADING TRANSMISSION...
+              </div>
             )}
-          </>
-        )}
-        {view === "edit" && (
-          <div style={{ padding: "8px" }}>
-            <textarea
-              value={editText}
-              onChange={(e) => setEditText(e.target.value)}
-              rows={3}
-              style={{
-                width: "100%",
-                padding: "10px",
-                backgroundColor: "#050508",
-                border: "1px solid #1a1a3a",
-                borderRadius: "6px",
-                color: "#fff",
-                fontSize: "13px",
-                outline: "none",
-                resize: "vertical",
-                boxSizing: "border-box",
-                fontFamily: "inherit",
-              }}
-            />
+            {!loading && messages.length === 0 && (
+              <div
+                style={{
+                  textAlign: "center",
+                  color: "#2a2a3a",
+                  fontSize: "13px",
+                  letterSpacing: "2px",
+                  marginTop: "40px",
+                }}
+              >
+                THIS CHANNEL IS SILENT.
+                <br />
+                <span style={{ fontSize: "11px" }}>
+                  Be the first to transmit.
+                </span>
+              </div>
+            )}
+            {messages.map((msg, i) => {
+              const isOwn = msg.user_id === user.id;
+              const showName =
+                i === 0 || messages[i - 1]?.user_id !== msg.user_id;
+              const dd = getDateDivider(msg, messages[i - 1]);
+              return (
+                <div key={msg.id}>
+                  <DateDivider date={dd} />
+                  <MessageBubble
+                    msg={msg}
+                    isOwn={isOwn}
+                    showName={showName}
+                    isMobile={isMobile}
+                    reactions={reactions[msg.id] || []}
+                    onReaction={addReaction}
+                    onContextMenu={(e) => handleMessageRightClick(e, msg)}
+                    formatTime={formatTime}
+                    groupReactionData={groupReactionData(msg.id)}
+                  />
+                </div>
+              );
+            })}
+            <div ref={bottomRef} />
+          </div>
+
+          {/* Typing */}
+          {typingUsers.length > 0 && (
             <div
+              style={{
+                padding: "4px 30px",
+                color: "#4a4a6a",
+                fontSize: "12px",
+                fontStyle: "italic",
+                flexShrink: 0,
+              }}
+            >
+              {typingUsers.map((t) => t.username).join(", ")}{" "}
+              {typingUsers.length === 1 ? "is" : "are"} typing...
+            </div>
+          )}
+
+          {/* Reply bar */}
+          {replyTo && (
+            <div
+              style={{
+                padding: "10px 30px",
+                backgroundColor: "#050508",
+                borderTop: "1px solid #1a1a3a",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                flexShrink: 0,
+              }}
+            >
+              <div>
+                <div style={{ color: "#9B30FF", fontSize: "11px" }}>
+                  Replying to {replyTo.username}
+                </div>
+                <div
+                  style={{
+                    color: "#4a4a6a",
+                    fontSize: "12px",
+                    overflow: "hidden",
+                    whiteSpace: "nowrap",
+                    textOverflow: "ellipsis",
+                    maxWidth: "400px",
+                  }}
+                >
+                  {replyTo.content}
+                </div>
+              </div>
+              <button
+                onClick={() => setReplyTo(null)}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  color: "#ff4444",
+                  fontSize: "18px",
+                  cursor: "pointer",
+                }}
+              >
+                ×
+              </button>
+            </div>
+          )}
+
+          {/* Input */}
+          <div
+            style={{
+              padding: isMobile ? "10px 12px" : "20px 30px",
+              borderTop: "1px solid #0d0d1a",
+              backgroundColor: "#020205",
+              flexShrink: 0,
+              position: isMobile ? "fixed" : "relative",
+              bottom: isMobile ? "56px" : "auto",
+              left: isMobile ? 0 : "auto",
+              right: isMobile ? 0 : "auto",
+              zIndex: isMobile ? 50 : "auto",
+            }}
+          >
+            <form
+              onSubmit={sendMessage}
               style={{
                 display: "flex",
                 gap: "8px",
-                marginTop: "8px",
+                alignItems: "center",
               }}
             >
-              <button
-                onClick={() => {
-                  onEdit(message, editText.trim());
-                  onClose();
+              <input
+                value={text}
+                onChange={(e) => {
+                  setText(e.target.value);
+                  handleTyping();
                 }}
+                placeholder={`Transmit to #${activeRoom?.name || ""}...`}
                 style={{
                   flex: 1,
-                  padding: "8px",
+                  padding: isMobile ? "12px 14px" : "14px 20px",
+                  backgroundColor: "#0a0a15",
+                  border: "1px solid #1a1a3a",
+                  borderRadius: "8px",
+                  color: "#ffffff",
+                  fontSize: isMobile ? "13px" : "14px",
+                  outline: "none",
+                }}
+              />
+              <button
+                type="button"
+                onClick={handleFileUpload}
+                style={{
+                  padding: isMobile ? "12px" : "14px 16px",
+                  border: "1px solid #1a1a3a",
+                  borderRadius: "8px",
+                  backgroundColor: "transparent",
+                  color: "#9B30FF",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                <Paperclip size={18} />
+              </button>
+              <button
+                type="submit"
+                style={{
+                  padding: isMobile ? "12px 16px" : "14px 28px",
                   border: "none",
-                  borderRadius: "6px",
+                  borderRadius: "8px",
                   background: "linear-gradient(135deg, #4B0082, #9B30FF)",
                   color: "white",
-                  fontSize: "11px",
+                  fontSize: "13px",
+                  fontWeight: "700",
+                  letterSpacing: "2px",
                   cursor: "pointer",
+                  boxShadow: "0 0 20px rgba(155,48,255,0.3)",
+                  whiteSpace: "nowrap",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
                 }}
               >
-                SAVE
+                {isMobile ? <Send size={16} /> : "TRANSMIT"}
               </button>
-              <button
-                onClick={onClose}
-                style={{
-                  flex: 1,
-                  padding: "8px",
-                  border: "1px solid #1a1a3a",
-                  borderRadius: "6px",
-                  backgroundColor: "transparent",
-                  color: "#4a4a6a",
-                  fontSize: "11px",
-                  cursor: "pointer",
-                }}
-              >
-                CANCEL
-              </button>
-            </div>
+            </form>
           </div>
-        )}
-        {view === "delete" && (
-          <div style={{ padding: "8px" }}>
-            <div
-              style={{
-                color: "#ff4444",
-                fontSize: "12px",
-                fontWeight: "600",
-                marginBottom: "8px",
-              }}
-            >
-              DELETE?
-            </div>
-            <div style={{ display: "flex", gap: "8px" }}>
-              <button
-                onClick={() => {
-                  onDelete(message.id);
-                  onClose();
-                }}
-                style={{
-                  flex: 1,
-                  padding: "8px",
-                  border: "none",
-                  borderRadius: "6px",
-                  background: "#440000",
-                  color: "#ff4444",
-                  fontSize: "11px",
-                  cursor: "pointer",
-                }}
-              >
-                DELETE
-              </button>
-              <button
-                onClick={onClose}
-                style={{
-                  flex: 1,
-                  padding: "8px",
-                  border: "1px solid #1a1a3a",
-                  borderRadius: "6px",
-                  backgroundColor: "transparent",
-                  color: "#4a4a6a",
-                  fontSize: "11px",
-                  cursor: "pointer",
-                }}
-              >
-                CANCEL
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
+        </div>
+      ) : view === "dms" ? (
+        <div
+          style={{
+            flex: 1,
+            display: "flex",
+            height: "100vh",
+            overflow: "hidden",
+            paddingBottom: isMobile ? "56px" : "0",
+          }}
+        >
+          {/* ── Key change: pass dmRef so Chat can reset DM state ── */}
+          <DirectMessages currentUser={user} ref={dmRef} />
+        </div>
+      ) : view === "online" ? (
+        <OnlinePanel onlineUsers={onlineUsers} currentUserId={user.id} />
+      ) : view === "settings" ? (
+        isMobile ? (
+          <MobileSettings user={user} />
+        ) : (
+          <SettingsPage user={user} onClose={() => handleViewChange("chat")} />
+        )
+      ) : null}
+
+      {/* ── Mobile Nav ── */}
+      {isMobile && (
+        <MobileNav view={view} onNavigate={handleViewChange} notification={0} />
+      )}
+
+      {/* ── File Upload ── */}
+      {pendingFile && (
+        <FileUploadPreview
+          file={pendingFile}
+          onSend={confirmFileUpload}
+          onCancel={() => setPendingFile(null)}
+        />
+      )}
+
+      {/* ── Search Modal — only when in chat view ── */}
+      {showSearch && activeRoom && view === "chat" && (
+        <SearchMessages
+          roomId={activeRoom.id}
+          tableName="messages"
+          onClose={() => setShowSearch(false)}
+        />
+      )}
+
+      {/* ── Pinned Modal — only when in chat view ── */}
+      {showPinned && activeRoom && view === "chat" && (
+        <PinnedMessages
+          roomId={activeRoom.id}
+          tableName="messages"
+          currentUser={user}
+          onClose={() => setShowPinned(false)}
+        />
+      )}
+
+      {/* ── Context Menu ── */}
+      {contextMenu && (
+        <ContextMenu
+          room={contextMenu.room}
+          isOwner={contextMenu.room.created_by === user.id}
+          position={{ x: contextMenu.x, y: contextMenu.y }}
+          onClose={() => setContextMenu(null)}
+          onRoomUpdated={refreshRooms}
+          onRoomDeleted={(id) => {
+            setRooms((p) => p.filter((r) => r.id !== id));
+            if (activeRoom?.id === id) {
+              const rem = rooms.filter((r) => r.id !== id);
+              setActiveRoom(rem[0] || null);
+            }
+            setContextMenu(null);
+          }}
+        />
+      )}
+
+      {/* ── Message Menu ── */}
+      {messageMenu && view === "chat" && (
+        <MessageMenu
+          message={messageMenu.message}
+          isOwn={messageMenu.message.user_id === user.id}
+          position={{ x: messageMenu.x, y: messageMenu.y }}
+          onClose={() => setMessageMenu(null)}
+          onReply={(msg) => setReplyTo(msg)}
+          onReact={(msg) => setShowEmojiPicker(msg)}
+          onMessagesChanged={refreshMessages}
+          currentUsername={username}
+        />
+      )}
+
+      {/* ── Emoji Picker ── */}
+      {showEmojiPicker && view === "chat" && (
+        <EmojiPicker
+          onSelect={(emoji) => {
+            addReaction(showEmojiPicker.id, emoji);
+            setShowEmojiPicker(null);
+          }}
+          onClose={() => setShowEmojiPicker(null)}
+        />
+      )}
     </div>
   );
 }
-
-// ── MItem helper ─────────────────────────────────────
-function MItem({ icon, label, onClick, danger }) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: "10px",
-        width: "100%",
-        padding: "8px 12px",
-        backgroundColor: "transparent",
-        border: "none",
-        borderRadius: "6px",
-        color: danger ? "#ff4444" : "#8a8aaa",
-        fontSize: "13px",
-        cursor: "pointer",
-        textAlign: "left",
-        transition: "all 0.15s",
-      }}
-      onMouseOver={(e) => {
-        e.currentTarget.style.backgroundColor = danger
-          ? "rgba(255,68,68,0.1)"
-          : "rgba(155,48,255,0.1)";
-        e.currentTarget.style.color = danger ? "#ff4444" : "#fff";
-      }}
-      onMouseOut={(e) => {
-        e.currentTarget.style.backgroundColor = "transparent";
-        e.currentTarget.style.color = danger ? "#ff4444" : "#8a8aaa";
-      }}
-    >
-      <span style={{ display: "flex", alignItems: "center" }}>{icon}</span>
-      <span>{label}</span>
-    </button>
-  );
-}
-
-export default DirectMessages;
