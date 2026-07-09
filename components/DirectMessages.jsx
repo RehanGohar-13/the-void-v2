@@ -36,6 +36,7 @@ export default function DirectMessages({ currentUser }) {
   const [searchResult, setSearchResult] = useState(null);
   const [searchError, setSearchError] = useState("");
   const [activeChat, setActiveChat] = useState(null);
+  const [activeChatRoomId, setActiveChatRoomId] = useState(null); // ← NEW
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState("");
   const [notification, setNotification] = useState(0);
@@ -45,18 +46,49 @@ export default function DirectMessages({ currentUser }) {
   const [reactions, setReactions] = useState({});
   const [typingUsers, setTypingUsers] = useState([]);
   const [pendingFile, setPendingFile] = useState(null);
-
-  // ── Sprint 5 new states ──────────────────────────────
   const [showDMSearch, setShowDMSearch] = useState(false);
   const [showDMPinned, setShowDMPinned] = useState(false);
   const [dmUnreadCounts, setDmUnreadCounts] = useState({});
-  // ────────────────────────────────────────────────────
 
   const bottomRef = useRef(null);
   const prevMsgCount = useRef(0);
   const msgContainerRef = useRef(null);
   const username = currentUser.user_metadata?.username || currentUser.email;
   const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
+
+  function getRoomId(a, b) {
+    return [a, b].sort().join("_");
+  }
+  function getFriendName(f) {
+    return f.from_user === currentUser.id ? f.to_username : f.from_username;
+  }
+  function formatTime(ts) {
+    const d = new Date(ts);
+    return `${d.getHours().toString().padStart(2, "0")}:${d
+      .getMinutes()
+      .toString()
+      .padStart(2, "0")}`;
+  }
+  function getDateDivider(msg, prev) {
+    const d = new Date(msg.created_at).toLocaleDateString();
+    if (!prev) return d;
+    return d !== new Date(prev.created_at).toLocaleDateString() ? d : null;
+  }
+  function groupReactionData(mid) {
+    return Object.entries(
+      (reactions[mid] || []).reduce((a, r) => {
+        a[r.emoji] = a[r.emoji] || {
+          count: 0,
+          users: [],
+          hasOwn: false,
+        };
+        a[r.emoji].count++;
+        a[r.emoji].users.push(r.username);
+        if (r.user_id === currentUser.id) a[r.emoji].hasOwn = true;
+        return a;
+      }, {}),
+    );
+  }
 
   // ── Load friends & requests ──────────────────────────
   useEffect(() => {
@@ -93,21 +125,16 @@ export default function DirectMessages({ currentUser }) {
     let mounted = true;
     let interval;
     async function loadDMs() {
-      if (!activeChat) return;
-      const fid =
-        activeChat.from_user === currentUser.id
-          ? activeChat.to_user
-          : activeChat.from_user;
-      const rid = getRoomId(currentUser.id, fid);
+      if (!activeChat || !activeChatRoomId) return;
       const { data } = await supabase
         .from("direct_messages")
         .select("*")
-        .eq("room_id", rid)
+        .eq("room_id", activeChatRoomId)
         .order("created_at", { ascending: true })
         .limit(100);
       if (mounted) setMessages(data || []);
     }
-    if (activeChat) {
+    if (activeChat && activeChatRoomId) {
       loadDMs();
       interval = setInterval(loadDMs, 3000);
     }
@@ -115,7 +142,7 @@ export default function DirectMessages({ currentUser }) {
       mounted = false;
       if (interval) clearInterval(interval);
     };
-  }, [activeChat, currentUser.id]);
+  }, [activeChat, activeChatRoomId]);
 
   // ── Load reactions ───────────────────────────────────
   useEffect(() => {
@@ -141,17 +168,12 @@ export default function DirectMessages({ currentUser }) {
     let interval;
     let mounted = true;
     async function check() {
-      if (!activeChat) return;
-      const fid =
-        activeChat.from_user === currentUser.id
-          ? activeChat.to_user
-          : activeChat.from_user;
-      const rid = getRoomId(currentUser.id, fid);
+      if (!activeChatRoomId) return;
       const cutoff = new Date(Date.now() - 3000).toISOString();
       const { data } = await supabase
         .from("typing")
         .select("*")
-        .eq("room_id", rid)
+        .eq("room_id", activeChatRoomId)
         .gte("typing_at", cutoff)
         .neq("user_id", currentUser.id);
       if (mounted) setTypingUsers(data || []);
@@ -164,7 +186,7 @@ export default function DirectMessages({ currentUser }) {
       mounted = false;
       if (interval) clearInterval(interval);
     };
-  }, [activeChat, currentUser.id]);
+  }, [activeChat, activeChatRoomId, currentUser.id]);
 
   // ── Auto scroll ──────────────────────────────────────
   useEffect(() => {
@@ -187,35 +209,44 @@ export default function DirectMessages({ currentUser }) {
     prevMsgCount.current = messages.length;
   }, [messages]);
 
-  // ── Unread counts ──────────────────────────
+  // ── Mark as read when opening DM ────────────────────
   useEffect(() => {
-    if (activeChat) return; // Don't track when inside a chat
+    if (!activeChat || !activeChatRoomId) return;
+    supabase.from("last_read").upsert({
+      user_id: currentUser.id,
+      room_id: activeChatRoomId,
+      read_at: new Date().toISOString(),
+    });
+    setDmUnreadCounts((prev) => {
+      const next = { ...prev };
+      delete next[activeChat.id];
+      return next;
+    });
+  }, [activeChat, activeChatRoomId, currentUser.id]);
+
+  // ── Unread counts ────────────────────────────────────
+  useEffect(() => {
+    if (activeChat) return;
     async function loadUnread() {
       if (!friends.length) return;
       const counts = {};
       for (const f of friends) {
         const fid = f.from_user === currentUser.id ? f.to_user : f.from_user;
         const rid = getRoomId(currentUser.id, fid);
-
-        // Get last read time for this DM room
         const { data: lr } = await supabase
           .from("last_read")
           .select("read_at")
           .eq("user_id", currentUser.id)
           .eq("room_id", rid)
           .single();
-
-        // Count messages after last read
         let query = supabase
           .from("direct_messages")
           .select("id", { count: "exact" })
           .eq("room_id", rid)
           .neq("user_id", currentUser.id);
-
         if (lr?.read_at) {
           query = query.gt("created_at", lr.read_at);
         }
-
         const { count } = await query;
         if (count > 0) counts[f.id] = count;
       }
@@ -224,56 +255,32 @@ export default function DirectMessages({ currentUser }) {
     loadUnread();
   }, [friends, activeChat, currentUser.id]);
 
-  // ── Mark as read when opening DM ──────────
-  useEffect(() => {
-    if (!activeChat) return;
-    const fid =
-      activeChat.from_user === currentUser.id
-        ? activeChat.to_user
-        : activeChat.from_user;
+  // ── Open a DM conversation ───────────────────────────
+  function openChat(f) {
+    const fid = f.from_user === currentUser.id ? f.to_user : f.from_user;
     const rid = getRoomId(currentUser.id, fid);
-    supabase.from("last_read").upsert({
-      user_id: currentUser.id,
-      room_id: rid,
-      read_at: new Date().toISOString(),
-    });
-    // Clear badge immediately
-    setDmUnreadCounts((prev) => {
-      const next = { ...prev };
-      delete next[activeChat.id];
-      return next;
-    });
-  }, [activeChat, currentUser.id]);
+    setActiveChat(f);
+    setActiveChatRoomId(rid); // ← store roomId in state
+    setMessages([]);
+    setShowDMSearch(false);
+    setShowDMPinned(false);
+    setMessageMenu(null);
+    setShowEmojiPicker(null);
+    setReplyTo(null);
+    prevMsgCount.current = 0;
+  }
 
-  // ── Helpers ──────────────────────────────────────────
-  function getRoomId(a, b) {
-    return [a, b].sort().join("_");
-  }
-  function getFriendName(f) {
-    return f.from_user === currentUser.id ? f.to_username : f.from_username;
-  }
-  function formatTime(ts) {
-    const d = new Date(ts);
-    return `${d.getHours().toString().padStart(2, "0")}:${d
-      .getMinutes()
-      .toString()
-      .padStart(2, "0")}`;
-  }
-  function getDateDivider(msg, prev) {
-    const d = new Date(msg.created_at).toLocaleDateString();
-    if (!prev) return d;
-    return d !== new Date(prev.created_at).toLocaleDateString() ? d : null;
-  }
-  function groupReactionData(mid) {
-    return Object.entries(
-      (reactions[mid] || []).reduce((a, r) => {
-        a[r.emoji] = a[r.emoji] || { count: 0, users: [], hasOwn: false };
-        a[r.emoji].count++;
-        a[r.emoji].users.push(r.username);
-        if (r.user_id === currentUser.id) a[r.emoji].hasOwn = true;
-        return a;
-      }, {}),
-    );
+  // ── Close a DM conversation ──────────────────────────
+  function closeChat() {
+    setActiveChat(null);
+    setActiveChatRoomId(null);
+    setMessages([]);
+    setShowDMSearch(false);
+    setShowDMPinned(false);
+    setMessageMenu(null);
+    setShowEmojiPicker(null);
+    setReplyTo(null);
+    prevMsgCount.current = 0;
   }
 
   // ── Friend / request actions ─────────────────────────
@@ -347,18 +354,13 @@ export default function DirectMessages({ currentUser }) {
   async function sendDM(e) {
     e.preventDefault();
     const content = text.trim();
-    if (!content || !activeChat) return;
+    if (!content || !activeChatRoomId) return;
     setText("");
-    const fid =
-      activeChat.from_user === currentUser.id
-        ? activeChat.to_user
-        : activeChat.from_user;
-    const rid = getRoomId(currentUser.id, fid);
     const msgData = {
       content,
       username,
       user_id: currentUser.id,
-      room_id: rid,
+      room_id: activeChatRoomId,
     };
     if (replyTo) {
       msgData.reply_to = replyTo.id;
@@ -369,19 +371,17 @@ export default function DirectMessages({ currentUser }) {
     await supabase.from("direct_messages").insert(msgData);
     await supabase.from("typing").delete().eq("user_id", currentUser.id);
   }
+
   async function handleDMTyping() {
-    if (!activeChat) return;
-    const fid =
-      activeChat.from_user === currentUser.id
-        ? activeChat.to_user
-        : activeChat.from_user;
+    if (!activeChatRoomId) return;
     await supabase.from("typing").upsert({
       user_id: currentUser.id,
       username,
-      room_id: getRoomId(currentUser.id, fid),
+      room_id: activeChatRoomId,
       typing_at: new Date().toISOString(),
     });
   }
+
   async function addDMReaction(mid, emoji) {
     const existing = (reactions[mid] || []).find(
       (r) => r.user_id === currentUser.id && r.emoji === emoji,
@@ -389,11 +389,15 @@ export default function DirectMessages({ currentUser }) {
     if (existing) {
       await supabase.from("reactions").delete().eq("id", existing.id);
     } else {
-      await supabase
-        .from("reactions")
-        .insert({ message_id: mid, user_id: currentUser.id, username, emoji });
+      await supabase.from("reactions").insert({
+        message_id: mid,
+        user_id: currentUser.id,
+        username,
+        emoji,
+      });
     }
   }
+
   async function handleDMFileUpload() {
     const input = document.createElement("input");
     input.type = "file";
@@ -410,11 +414,14 @@ export default function DirectMessages({ currentUser }) {
     };
     input.click();
   }
+
   async function confirmDMFileUpload(file, caption) {
-    if (!file || !activeChat) return;
+    if (!file || !activeChatRoomId) return;
     setPendingFile(null);
     const ext = file.name.split(".").pop();
-    const un = `${Date.now()}_${Math.random().toString(36).substring(7)}.${ext}`;
+    const un = `${Date.now()}_${Math.random()
+      .toString(36)
+      .substring(7)}.${ext}`;
     const { error: ue } = await supabase.storage
       .from("attachments")
       .upload(un, file);
@@ -423,38 +430,34 @@ export default function DirectMessages({ currentUser }) {
       return;
     }
     const { data: ud } = supabase.storage.from("attachments").getPublicUrl(un);
-    const fid =
-      activeChat.from_user === currentUser.id
-        ? activeChat.to_user
-        : activeChat.from_user;
     await supabase.from("direct_messages").insert({
       content: caption || "",
       username,
       user_id: currentUser.id,
-      room_id: getRoomId(currentUser.id, fid),
+      room_id: activeChatRoomId,
       file_url: ud.publicUrl,
       file_name: file.name,
       file_type: file.type,
     });
   }
+
   async function editDMMessage(msg, nc) {
     await supabase
       .from("direct_messages")
       .update({ content: nc, edited: true })
       .eq("id", msg.id);
   }
+
   async function deleteDMMessage(id) {
     await supabase.from("direct_messages").delete().eq("id", id);
   }
 
-  // ── Pin action ─────────────────────────────
   async function pinDMMessage(msg) {
-    const isPinned = msg.pinned;
     await supabase
       .from("direct_messages")
       .update({
-        pinned: !isPinned,
-        pinned_by: !isPinned ? username : null,
+        pinned: !msg.pinned,
+        pinned_by: !msg.pinned ? username : null,
       })
       .eq("id", msg.id);
   }
@@ -469,14 +472,11 @@ export default function DirectMessages({ currentUser }) {
     });
   }
 
-  // ── Active DM chat view ──────────────────────────────
+  // ════════════════════════════════════════════════════
+  // ACTIVE DM CHAT VIEW
+  // ════════════════════════════════════════════════════
   if (activeChat) {
     const fn = getFriendName(activeChat);
-    const fid =
-      activeChat.from_user === currentUser.id
-        ? activeChat.to_user
-        : activeChat.from_user;
-    const rid = getRoomId(currentUser.id, fid);
 
     return (
       <div
@@ -502,13 +502,7 @@ export default function DirectMessages({ currentUser }) {
           }}
         >
           <button
-            onClick={() => {
-              setActiveChat(null);
-              setMessages([]);
-              setShowDMSearch(false);
-              setShowDMPinned(false);
-              prevMsgCount.current = 0;
-            }}
+            onClick={closeChat}
             style={{
               background: "transparent",
               border: "1px solid #1a1a3a",
@@ -614,26 +608,6 @@ export default function DirectMessages({ currentUser }) {
             </button>
           </div>
         </div>
-
-        {/* ── Search Modal ── */}
-        {showDMSearch && (
-          <SearchMessages
-            roomId={rid}
-            tableName="direct_messages"
-            onClose={() => setShowDMSearch(false)}
-          />
-        )}
-
-        {/* ── Pinned Modal ── */}
-        {showDMPinned && (
-          <PinnedMessages
-            roomId={rid}
-            tableName="direct_messages"
-            currentUser={currentUser}
-            onClose={() => setShowDMPinned(false)}
-            onUnpin={pinDMMessage}
-          />
-        )}
 
         {/* ── Messages ── */}
         <div
@@ -761,7 +735,11 @@ export default function DirectMessages({ currentUser }) {
         >
           <form
             onSubmit={sendDM}
-            style={{ display: "flex", gap: "8px", alignItems: "center" }}
+            style={{
+              display: "flex",
+              gap: "8px",
+              alignItems: "center",
+            }}
           >
             <input
               value={text}
@@ -822,7 +800,7 @@ export default function DirectMessages({ currentUser }) {
           </form>
         </div>
 
-        {/* ── Menus & Pickers ── */}
+        {/* ── Message Menu ── */}
         {messageMenu && (
           <DMMessageMenu
             message={messageMenu.message}
@@ -834,8 +812,11 @@ export default function DirectMessages({ currentUser }) {
             onEdit={editDMMessage}
             onDelete={deleteDMMessage}
             onPin={pinDMMessage}
+            currentUsername={username}
           />
         )}
+
+        {/* ── Emoji Picker ── */}
         {showEmojiPicker && (
           <EmojiPicker
             onSelect={(emoji) => {
@@ -845,6 +826,8 @@ export default function DirectMessages({ currentUser }) {
             onClose={() => setShowEmojiPicker(null)}
           />
         )}
+
+        {/* ── File Upload ── */}
         {pendingFile && (
           <FileUploadPreview
             file={pendingFile}
@@ -852,11 +835,32 @@ export default function DirectMessages({ currentUser }) {
             onCancel={() => setPendingFile(null)}
           />
         )}
+
+        {/* ── Search Modal ── */}
+        {showDMSearch && activeChatRoomId && (
+          <SearchMessages
+            roomId={activeChatRoomId}
+            tableName="direct_messages"
+            onClose={() => setShowDMSearch(false)}
+          />
+        )}
+
+        {/* ── Pinned Modal ── */}
+        {showDMPinned && activeChatRoomId && (
+          <PinnedMessages
+            roomId={activeChatRoomId}
+            tableName="direct_messages"
+            currentUser={currentUser}
+            onClose={() => setShowDMPinned(false)}
+          />
+        )}
       </div>
     );
   }
 
-  // ── Friends list view ────────────────────────────────
+  // ════════════════════════════════════════════════════
+  // FRIENDS LIST VIEW
+  // ════════════════════════════════════════════════════
   return (
     <div
       style={{
@@ -931,7 +935,11 @@ export default function DirectMessages({ currentUser }) {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            style={{ display: "flex", flexDirection: "column", gap: "8px" }}
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: "8px",
+            }}
           >
             {friends.length === 0 && (
               <div
@@ -949,11 +957,7 @@ export default function DirectMessages({ currentUser }) {
             {friends.map((f) => (
               <button
                 key={f.id}
-                onClick={() => {
-                  setActiveChat(f);
-                  setMessages([]);
-                  prevMsgCount.current = 0;
-                }}
+                onClick={() => openChat(f)}
                 style={{
                   display: "flex",
                   alignItems: "center",
@@ -964,10 +968,9 @@ export default function DirectMessages({ currentUser }) {
                   borderRadius: "10px",
                   cursor: "pointer",
                   textAlign: "left",
-                  position: "relative", // needed for badge
+                  position: "relative",
                 }}
               >
-                {/* Avatar */}
                 <div style={{ position: "relative" }}>
                   <div
                     style={{
@@ -985,7 +988,7 @@ export default function DirectMessages({ currentUser }) {
                   >
                     {getFriendName(f).charAt(0).toUpperCase()}
                   </div>
-                  {/* ── Sprint 5: Unread badge ── */}
+                  {/* Unread badge */}
                   {dmUnreadCounts[f.id] > 0 && (
                     <div
                       style={{
@@ -1009,7 +1012,6 @@ export default function DirectMessages({ currentUser }) {
                     </div>
                   )}
                 </div>
-
                 <div style={{ flex: 1 }}>
                   <div
                     style={{
@@ -1038,7 +1040,11 @@ export default function DirectMessages({ currentUser }) {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            style={{ display: "flex", flexDirection: "column", gap: "8px" }}
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: "8px",
+            }}
           >
             {requests.length === 0 && (
               <div
@@ -1154,7 +1160,7 @@ export default function DirectMessages({ currentUser }) {
           </motion.div>
         )}
 
-        {/* ── Search / Add Friend tab ── */}
+        {/* ── Add Friend tab ── */}
         {tab === "search" && (
           <motion.div
             key="search"
@@ -1172,7 +1178,13 @@ export default function DirectMessages({ currentUser }) {
             >
               ENTER EXACT USERNAME
             </div>
-            <div style={{ display: "flex", gap: "10px", marginBottom: "16px" }}>
+            <div
+              style={{
+                display: "flex",
+                gap: "10px",
+                marginBottom: "16px",
+              }}
+            >
               <input
                 value={searchQuery}
                 onChange={(e) => {
@@ -1304,7 +1316,9 @@ export default function DirectMessages({ currentUser }) {
   );
 }
 
-// ── DMMessageMenu (with Pin added) ───────────────────────
+// ════════════════════════════════════════════════════
+// DM MESSAGE MENU
+// ════════════════════════════════════════════════════
 function DMMessageMenu({
   message,
   isOwn,
@@ -1315,6 +1329,7 @@ function DMMessageMenu({
   onEdit,
   onDelete,
   onPin,
+  currentUsername,
 }) {
   const [view, setView] = useState("menu");
   const [editText, setEditText] = useState(message.content);
@@ -1372,7 +1387,6 @@ function DMMessageMenu({
                 onClose();
               }}
             />
-            {/* ── Sprint 5: Pin option ── */}
             <MItem
               icon={<Pin size={14} />}
               label={isPinned ? "Unpin Message" : "Pin Message"}
@@ -1425,7 +1439,13 @@ function DMMessageMenu({
                 fontFamily: "inherit",
               }}
             />
-            <div style={{ display: "flex", gap: "8px", marginTop: "8px" }}>
+            <div
+              style={{
+                display: "flex",
+                gap: "8px",
+                marginTop: "8px",
+              }}
+            >
               <button
                 onClick={() => {
                   onEdit(message, editText.trim());
@@ -1516,7 +1536,7 @@ function DMMessageMenu({
   );
 }
 
-// ── MItem helper (unchanged) ─────────────────────────────
+// ── MItem helper ─────────────────────────────────────
 function MItem({ icon, label, onClick, danger }) {
   return (
     <button
