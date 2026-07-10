@@ -253,7 +253,6 @@ const DirectMessages = forwardRef(function DirectMessages(
       },
     );
 
-    // Clear badge immediately for the DM you opened
     setDmUnreadCounts((prev) => {
       const next = { ...prev };
       delete next[activeChat.id];
