@@ -274,27 +274,41 @@ const DirectMessages = forwardRef(function DirectMessages(
       const counts = {};
 
       for (const f of friends) {
-        const fid = f.from_user === currentUser.id ? f.to_user : f.from_user;
-        const rid = getRoomId(currentUser.id, fid);
+        try {
+          const fid = f.from_user === currentUser.id ? f.to_user : f.from_user;
+          const rid = getRoomId(currentUser.id, fid);
 
-        const { data: lrRows } = await supabase
-          .from("last_read")
-          .select("read_at")
-          .eq("user_id", currentUser.id)
-          .eq("room_id", rid)
-          .order("read_at", { ascending: false })
-          .limit(1);
+          const { data: lrData, error: lrError } = await supabase
+            .from("last_read")
+            .select("read_at")
+            .eq("user_id", currentUser.id)
+            .eq("room_id", rid)
+            .order("read_at", { ascending: false })
+            .limit(1);
 
-        const readAt = lrRows?.[0]?.read_at || "1970-01-01T00:00:00.000Z";
+          if (lrError) {
+            console.warn("DM last_read error:", lrError);
+            continue;
+          }
 
-        const { count } = await supabase
-          .from("direct_messages")
-          .select("id", { count: "exact", head: true })
-          .eq("room_id", rid)
-          .neq("user_id", currentUser.id)
-          .gt("created_at", readAt);
+          const readAt = lrData?.[0]?.read_at || "1970-01-01T00:00:00.000Z";
 
-        if (count > 0) counts[f.id] = count;
+          const { count, error: countError } = await supabase
+            .from("direct_messages")
+            .select("id", { count: "exact", head: true })
+            .eq("room_id", rid)
+            .neq("user_id", currentUser.id)
+            .gt("created_at", readAt);
+
+          if (countError) {
+            console.warn("DM messages count error:", countError);
+            continue;
+          }
+
+          if (count > 0) counts[f.id] = count;
+        } catch (e) {
+          console.warn("DM unread poll error:", e);
+        }
       }
 
       if (!alive) return;
