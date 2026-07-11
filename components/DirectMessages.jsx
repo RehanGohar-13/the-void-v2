@@ -263,11 +263,14 @@ const DirectMessages = forwardRef(function DirectMessages(
 
   // ── Unread counts ────────────────────────────────────
   useEffect(() => {
-    if (activeChat || !friends.length || !currentUser?.id) return;
+    if (!friends.length || !currentUser?.id) return;
 
     let alive = true;
 
     async function loadUnread() {
+      // Skip if we're currently in a DM conversation
+      if (activeChat || activeChatRoomId) return;
+
       const counts = {};
 
       for (const f of friends) {
@@ -295,6 +298,10 @@ const DirectMessages = forwardRef(function DirectMessages(
       }
 
       if (!alive) return;
+
+      // Double check — don't set badge if we entered a chat during the fetch
+      if (activeChat || activeChatRoomId) return;
+
       setDmUnreadCounts(counts);
     }
 
@@ -306,7 +313,7 @@ const DirectMessages = forwardRef(function DirectMessages(
       alive = false;
       clearInterval(i);
     };
-  }, [friends, activeChat, currentUser?.id]);
+  }, [friends, activeChat, activeChatRoomId, currentUser?.id]);
 
   // ── Open a DM conversation ───────────────────────────
   function openChat(f) {
