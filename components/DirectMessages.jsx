@@ -9,7 +9,6 @@ import {
 } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { supabase } from "../lib/supabaseClient";
-import useUnreadBadges from "../hooks/useUnreadBadges";
 import {
   Reply,
   Smile,
@@ -67,11 +66,10 @@ const DirectMessages = forwardRef(function DirectMessages(
   const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
 
   // ── Unread badges hook ───────────────────────────────
-  const {
-    unreadCounts: dmUnreadCounts,
-    markRoomRead: markDMRead,
-    clearActive: clearDMActive,
-  } = useUnreadBadges("dms", null, friends, currentUser);
+  // DM badges disabled pending 3.1 refactor
+  const dmUnreadCounts = {};
+  const markDMRead = () => {};
+  const clearDMActive = () => {};
 
   // ── Expose reset() to Chat.jsx via ref ──────────────
   useImperativeHandle(ref, () => ({
