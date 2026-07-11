@@ -1,36 +1,124 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
+# The Void V2
+
+A real-time chat platform with a dark luxury aesthetic. Built as a Discord clone for portfolio and university applications.
+
+## Live Demo
+
+🌐 [the-void-v2.vercel.app](https://the-void-v2.vercel.app)
+
+## Features
+
+- **Group Channels** — Public and private channels with creation, editing, and member management
+- **Direct Messages** — Friend system with add, accept, decline, and block
+- **Real-time Chat** — Polling-based instant messaging with typing indicators
+- **Message Reactions** — Emoji picker with 9 categories and 200+ emojis
+- **File Attachments** — Upload images, videos, audio, PDFs, code files (25MB limit)
+- **Pinned Messages** — Pin important messages with golden indicator
+- **Message Search** — Full-text search within channels and DMs
+- **Unread Badges** — Red notification badges on channels
+- **Online Presence** — Live online user list with 30-second heartbeat
+- **Reply System** — Thread replies with context preview
+- **Message Editing** — Edit or delete your own messages
+- **Mobile Responsive** — Bottom navigation, horizontal channel pills, touch-optimized
+- **Dark Theme** — Custom purple (#9B30FF) + electric blue (#00BFFF) color scheme
+- **Custom Font** — Mephisto font for titles and branding
+
+## Tech Stack
+
+| Layer           | Technology                                     |
+| --------------- | ---------------------------------------------- |
+| Framework       | Next.js 14 (App Router)                        |
+| Frontend        | React, JavaScript/JSX, Framer Motion           |
+| Backend         | Supabase (Auth, PostgreSQL, Storage, Realtime) |
+| Icons           | Lucide React                                   |
+| Font            | Mephisto (custom TTF)                          |
+| Hosting         | Vercel                                         |
+| Version Control | GitHub                                         |
+
+## Database Scheme
+
+- `messages` — Group channel messages (with pin, reply, file support)
+- `direct_messages` — DM conversation messages
+- `rooms` — Channels (public/private, color, icon)
+- `profiles` — User profiles (avatar color, status message)
+- `friendships` — Friend relationships (pending, accepted, blocked)
+- `presence` — Online/offline status tracking
+- `typing` — Typing indicator data
+- `reactions` — Emoji reactions (shared between messages and direct_messages)
+- `channel_members` — Private channel member lists
+- `last_read` — Read receipt timestamps per user per room
+
+## Project Structure
+
+```bash
+the-void-v2/
+├── app/
+│ ├── layout.js
+│ ├── page.js
+│ └── globals.css
+├── components/
+│ ├── AppShell.jsx
+│ ├── Auth.jsx
+│ ├── Chat.jsx
+│ ├── DirectMessages.jsx
+│ ├── MessageBubble.jsx
+│ ├── DateDivider.jsx
+│ ├── FilePreview.jsx
+│ ├── FileUploadPreview.jsx
+│ ├── EmojiPicker.jsx
+│ ├── ContextMenu.jsx
+│ ├── MessageMenu.jsx
+│ ├── SearchMessages.jsx
+│ ├── PinnedMessages.jsx
+│ ├── SettingsPage.jsx
+│ ├── MobileNav.jsx
+│ ├── MobileSettings.jsx
+│ └── OnlinePanel.jsx
+├── hooks/
+│ └── useUnreadBadges.js
+├── lib/
+│ └── supabaseClient.js
+├── public/
+│ └── fonts/
+│ └── Mephisto.ttf
+├── README.md
+└── .env.local
+```
 
 ## Getting Started
 
-First, run the development server:
-
 ```bash
+git clone https://github.com/RehanGohar-13/the-void-v2.git
+cd the-void-v2
+npm install
+# Create .env.local with Supabase credentials
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Environment Variables
 
-You can start editing the page by modifying `app/page.js`. The page auto-updates as you edit the file.
+```bash
+NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Author
 
-## Learn More
+### Rehan Gohar
 
-To learn more about Next.js, take a look at the following resources:
+- Location: Pakistan
+- Self-taught developer
+- Portfolio project for career and university applications
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Previous Version
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+The Void V1 was built with Python Flask + CustomTkinter and self-hosted on Linux with Cloudflare tunnel. It is archived at:
 
-## Deploy on Vercel
+```bash
+github.com/RehanGohar-13/The-Void
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Acknowledgments
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- Uncle (Chachu) for suggesting the Next.js + Supabase stack
+- Halper 2.0 & Helper 3.0 for AI-assisted development (and yes the Halper is intentional)

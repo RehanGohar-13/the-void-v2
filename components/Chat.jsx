@@ -978,6 +978,8 @@ export default function Chat({ user }) {
                 alignItems: "center",
                 gap: "8px",
                 overflowX: "auto",
+                WebkitOverflowScrolling: "touch",
+                scrollbarWidth: "none",
               }}
             >
               {rooms.map((room) => (
@@ -1421,7 +1423,7 @@ export default function Chat({ user }) {
               backgroundColor: "#020205",
               flexShrink: 0,
               position: isMobile ? "fixed" : "relative",
-              bottom: isMobile ? "56px" : "auto",
+              bottom: isMobile ? "60px" : "auto",
               left: isMobile ? 0 : "auto",
               right: isMobile ? 0 : "auto",
               zIndex: isMobile ? 50 : "auto",
@@ -1502,7 +1504,7 @@ export default function Chat({ user }) {
             display: "flex",
             height: "100vh",
             overflow: "hidden",
-            paddingBottom: isMobile ? "56px" : "0",
+            paddingBottom: isMobile ? "60px" : "0",
           }}
         >
           <DirectMessages currentUser={user} ref={dmRef} />
