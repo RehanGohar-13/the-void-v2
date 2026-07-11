@@ -17,6 +17,7 @@ import MessageBubble from "./MessageBubble";
 import DateDivider from "./DateDivider";
 import SearchMessages from "./SearchMessages";
 import PinnedMessages from "./PinnedMessages";
+import useUnreadBadges from "../hooks/useUnreadBadges";
 import {
   Settings,
   LogOut,
@@ -51,12 +52,22 @@ export default function Chat({ user }) {
   const [pendingFile, setPendingFile] = useState(null);
   const [showSearch, setShowSearch] = useState(false);
   const [showPinned, setShowPinned] = useState(false);
-  const [unreadCounts, setUnreadCounts] = useState({});
+
   const bottomRef = useRef(null);
   const prevMessageCount = useRef(0);
   const messagesContainerRef = useRef(null);
-  const dmRef = useRef(null); // ← ref to DirectMessages reset fn
-  const username = user.user_metadata?.username || user.email;
+  const dmRef = useRef(null);
+  const username = user?.user_metadata?.username || user?.email || "Unknown";
+
+  // ── Safety guard ─────────────────────────────────────
+  if (!user?.id) return null;
+
+  // ── Unread badges hook ───────────────────────────────
+  const {
+    unreadCounts,
+    markRoomRead: markChannelRead,
+    clearActive: clearChannelActive,
+  } = useUnreadBadges("channels", rooms, null, user);
 
   useEffect(() => {
     function checkMobile() {
@@ -72,6 +83,7 @@ export default function Chat({ user }) {
   }, [user.id]);
 
   async function loadRooms() {
+    if (!user?.id) return;
     const { data } = await supabase
       .from("rooms")
       .select("*")
@@ -116,6 +128,7 @@ export default function Chat({ user }) {
   }
 
   useEffect(() => {
+    if (!user?.id) return;
     async function updatePresence() {
       await supabase.from("presence").upsert({
         user_id: user.id,
@@ -240,75 +253,9 @@ export default function Chat({ user }) {
     prevMessageCount.current = messages.length;
   }, [messages]);
 
-  // Track read status
-  useEffect(() => {
-    async function trackRead() {
-      if (!activeRoom || view !== "chat" || !user?.id) return;
-
-      const now = new Date().toISOString();
-
-      await supabase.from("last_read").upsert(
-        {
-          user_id: user.id,
-          room_id: activeRoom.id,
-          read_at: now,
-        },
-        {
-          onConflict: "user_id,room_id",
-        },
-      );
-
-      // Clear unread badge immediately for the room you are reading
-      setUnreadCounts((prev) => {
-        const next = { ...prev };
-        delete next[activeRoom.id];
-        return next;
-      });
-    }
-
-    trackRead();
-  }, [activeRoom?.id, view, messages.length, user?.id]);
-
-  useEffect(() => {
-    if (!rooms.length || !user?.id) return;
-    let alive = true;
-    async function loadUnread() {
-      const counts = {};
-      for (const room of rooms) {
-        const { data: lrRows } = await supabase
-          .from("last_read")
-          .select("read_at")
-          .eq("user_id", user.id)
-          .eq("room_id", room.id)
-          .order("read_at", { ascending: false })
-          .limit(1);
-        const readAt = lrRows?.[0]?.read_at || "1970-01-01T00:00:00.000Z";
-        const { count } = await supabase
-          .from("messages")
-          .select("id", { count: "exact", head: true })
-          .eq("room_id", room.id)
-          .neq("user_id", user.id)
-          .gt("created_at", readAt);
-        if (count > 0) counts[room.id] = count;
-      }
-      if (!alive) return;
-      if (view === "chat" && activeRoom?.id) {
-        delete counts[activeRoom.id];
-      }
-      setUnreadCounts(counts);
-    }
-    loadUnread();
-    const i = setInterval(loadUnread, 5000);
-    return () => {
-      alive = false;
-      clearInterval(i);
-    };
-  }, [rooms, user?.id, view, activeRoom?.id]);
-
-  // ── View switching — resets ALL overlays ────────────
+  // ── View switching ───────────────────────────────────
   function handleViewChange(v) {
     if (v === view) return;
-    // Reset Chat.jsx overlays
     setShowSearch(false);
     setShowPinned(false);
     setMessageMenu(null);
@@ -316,10 +263,8 @@ export default function Chat({ user }) {
     setShowEmojiPicker(null);
     setReplyTo(null);
     setPendingFile(null);
-    // Reset DirectMessages overlays via ref
-    if (dmRef.current?.reset) {
-      dmRef.current.reset();
-    }
+    clearChannelActive();
+    if (dmRef.current?.reset) dmRef.current.reset();
     setView(v);
   }
 
@@ -332,6 +277,7 @@ export default function Chat({ user }) {
     setMessageMenu(null);
     setShowEmojiPicker(null);
     setReplyTo(null);
+    markChannelRead(room.id, room.id);
     setView("chat");
   }
 
@@ -1559,7 +1505,6 @@ export default function Chat({ user }) {
             paddingBottom: isMobile ? "56px" : "0",
           }}
         >
-          {/* ── Key change: pass dmRef so Chat can reset DM state ── */}
           <DirectMessages currentUser={user} ref={dmRef} />
         </div>
       ) : view === "online" ? (
@@ -1572,12 +1517,10 @@ export default function Chat({ user }) {
         )
       ) : null}
 
-      {/* ── Mobile Nav ── */}
       {isMobile && (
         <MobileNav view={view} onNavigate={handleViewChange} notification={0} />
       )}
 
-      {/* ── File Upload ── */}
       {pendingFile && (
         <FileUploadPreview
           file={pendingFile}
@@ -1586,7 +1529,6 @@ export default function Chat({ user }) {
         />
       )}
 
-      {/* ── Search Modal — only when in chat view ── */}
       {showSearch && activeRoom && view === "chat" && (
         <SearchMessages
           roomId={activeRoom.id}
@@ -1595,7 +1537,6 @@ export default function Chat({ user }) {
         />
       )}
 
-      {/* ── Pinned Modal — only when in chat view ── */}
       {showPinned && activeRoom && view === "chat" && (
         <PinnedMessages
           roomId={activeRoom.id}
@@ -1605,7 +1546,6 @@ export default function Chat({ user }) {
         />
       )}
 
-      {/* ── Context Menu ── */}
       {contextMenu && (
         <ContextMenu
           room={contextMenu.room}
@@ -1624,7 +1564,6 @@ export default function Chat({ user }) {
         />
       )}
 
-      {/* ── Message Menu ── */}
       {messageMenu && view === "chat" && (
         <MessageMenu
           message={messageMenu.message}
@@ -1638,7 +1577,6 @@ export default function Chat({ user }) {
         />
       )}
 
-      {/* ── Emoji Picker ── */}
       {showEmojiPicker && view === "chat" && (
         <EmojiPicker
           onSelect={(emoji) => {

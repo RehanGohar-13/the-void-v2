@@ -9,6 +9,7 @@ import {
 } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { supabase } from "../lib/supabaseClient";
+import useUnreadBadges from "../hooks/useUnreadBadges";
 import {
   Reply,
   Smile,
@@ -57,7 +58,6 @@ const DirectMessages = forwardRef(function DirectMessages(
   const [pendingFile, setPendingFile] = useState(null);
   const [showDMSearch, setShowDMSearch] = useState(false);
   const [showDMPinned, setShowDMPinned] = useState(false);
-  const [dmUnreadCounts, setDmUnreadCounts] = useState({});
 
   const bottomRef = useRef(null);
   const prevMsgCount = useRef(0);
@@ -65,6 +65,13 @@ const DirectMessages = forwardRef(function DirectMessages(
   const username =
     currentUser?.user_metadata?.username || currentUser?.email || "Unknown";
   const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
+
+  // ── Unread badges hook ───────────────────────────────
+  const {
+    unreadCounts: dmUnreadCounts,
+    markRoomRead: markDMRead,
+    clearActive: clearDMActive,
+  } = useUnreadBadges("dms", null, friends, currentUser);
 
   // ── Expose reset() to Chat.jsx via ref ──────────────
   useImperativeHandle(ref, () => ({
@@ -78,6 +85,7 @@ const DirectMessages = forwardRef(function DirectMessages(
       setShowEmojiPicker(null);
       setReplyTo(null);
       setPendingFile(null);
+      clearDMActive();
       prevMsgCount.current = 0;
     },
   }));
@@ -230,104 +238,13 @@ const DirectMessages = forwardRef(function DirectMessages(
       const near = c.scrollHeight - c.scrollTop - c.clientHeight < 150;
       if (near)
         setTimeout(() => {
-          bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+          bottomRef.current?.scrollIntoView({
+            behavior: "smooth",
+          });
         }, 80);
     }
     prevMsgCount.current = messages.length;
   }, [messages]);
-
-  // ── Mark as read when opening DM ────────────────────
-  useEffect(() => {
-    if (!activeChat || !activeChatRoomId || !currentUser?.id) return;
-
-    const now = new Date().toISOString();
-
-    supabase.from("last_read").upsert(
-      {
-        user_id: currentUser.id,
-        room_id: activeChatRoomId,
-        read_at: now,
-      },
-      {
-        onConflict: "user_id,room_id",
-      },
-    );
-
-    // Clear badge immediately for the DM you opened
-    setDmUnreadCounts((prev) => {
-      const next = { ...prev };
-      delete next[activeChat.id];
-      return next;
-    });
-  }, [activeChat?.id, activeChatRoomId, messages.length, currentUser?.id]);
-
-  // ── Unread counts ────────────────────────────────────
-  useEffect(() => {
-    if (!friends.length || !currentUser?.id) return;
-
-    let alive = true;
-
-    async function loadUnread() {
-      // Skip if we're currently in a DM conversation
-      if (activeChat || activeChatRoomId) return;
-
-      const counts = {};
-
-      for (const f of friends) {
-        try {
-          const fid = f.from_user === currentUser.id ? f.to_user : f.from_user;
-          const rid = getRoomId(currentUser.id, fid);
-
-          const { data: lrData, error: lrError } = await supabase
-            .from("last_read")
-            .select("read_at")
-            .eq("user_id", currentUser.id)
-            .eq("room_id", rid)
-            .order("read_at", { ascending: false })
-            .limit(1);
-
-          if (lrError) {
-            console.warn("DM last_read error:", lrError);
-            continue;
-          }
-
-          const readAt = lrData?.[0]?.read_at || "1970-01-01T00:00:00.000Z";
-
-          const { count, error: countError } = await supabase
-            .from("direct_messages")
-            .select("id", { count: "exact", head: true })
-            .eq("room_id", rid)
-            .neq("user_id", currentUser.id)
-            .gt("created_at", readAt);
-
-          if (countError) {
-            console.warn("DM messages count error:", countError);
-            continue;
-          }
-
-          if (count > 0) counts[f.id] = count;
-        } catch (e) {
-          console.warn("DM unread poll error:", e);
-        }
-      }
-
-      if (!alive) return;
-
-      // Double check — don't set badge if we entered a chat during the fetch
-      if (activeChat || activeChatRoomId) return;
-
-      setDmUnreadCounts(counts);
-    }
-
-    loadUnread();
-
-    const i = setInterval(loadUnread, 5000);
-
-    return () => {
-      alive = false;
-      clearInterval(i);
-    };
-  }, [friends, activeChat, activeChatRoomId, currentUser?.id]);
 
   // ── Open a DM conversation ───────────────────────────
   function openChat(f) {
@@ -341,6 +258,7 @@ const DirectMessages = forwardRef(function DirectMessages(
     setMessageMenu(null);
     setShowEmojiPicker(null);
     setReplyTo(null);
+    markDMRead(rid, f.id);
     prevMsgCount.current = 0;
   }
 
@@ -354,6 +272,7 @@ const DirectMessages = forwardRef(function DirectMessages(
     setMessageMenu(null);
     setShowEmojiPicker(null);
     setReplyTo(null);
+    clearDMActive();
     prevMsgCount.current = 0;
   }
 
@@ -975,7 +894,13 @@ const DirectMessages = forwardRef(function DirectMessages(
       />
 
       {/* ── Tabs ── */}
-      <div style={{ display: "flex", gap: "4px", marginBottom: "24px" }}>
+      <div
+        style={{
+          display: "flex",
+          gap: "4px",
+          marginBottom: "24px",
+        }}
+      >
         {[
           { key: "friends", label: "FRIENDS" },
           {
@@ -1099,7 +1024,12 @@ const DirectMessages = forwardRef(function DirectMessages(
                   >
                     {getFriendName(f)}
                   </div>
-                  <div style={{ color: "#2a2a3a", fontSize: "11px" }}>
+                  <div
+                    style={{
+                      color: "#2a2a3a",
+                      fontSize: "11px",
+                    }}
+                  >
                     {dmUnreadCounts[f.id] > 0
                       ? `${dmUnreadCounts[f.id]} new message${dmUnreadCounts[f.id] > 1 ? "s" : ""}`
                       : "Click to open DM"}
@@ -1175,7 +1105,12 @@ const DirectMessages = forwardRef(function DirectMessages(
                   >
                     {r.from_username}
                   </div>
-                  <div style={{ color: "#2a2a3a", fontSize: "11px" }}>
+                  <div
+                    style={{
+                      color: "#2a2a3a",
+                      fontSize: "11px",
+                    }}
+                  >
                     Wants to connect
                   </div>
                 </div>
@@ -1361,7 +1296,12 @@ const DirectMessages = forwardRef(function DirectMessages(
                   >
                     {searchResult.username}
                   </div>
-                  <div style={{ color: "#2a2a3a", fontSize: "11px" }}>
+                  <div
+                    style={{
+                      color: "#2a2a3a",
+                      fontSize: "11px",
+                    }}
+                  >
                     User found
                   </div>
                 </div>
