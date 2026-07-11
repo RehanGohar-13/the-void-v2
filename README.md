@@ -35,7 +35,7 @@ A real-time chat platform with a dark luxury aesthetic. Built as a Discord clone
 | Hosting         | Vercel                                         |
 | Version Control | GitHub                                         |
 
-## Database Scheme
+## Database Schema
 
 - `messages` — Group channel messages (with pin, reply, file support)
 - `direct_messages` — DM conversation messages
