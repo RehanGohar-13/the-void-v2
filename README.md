@@ -122,3 +122,7 @@ github.com/RehanGohar-13/The-Void
 
 - Uncle (Chachu) for suggesting the Next.js + Supabase stack
 - Halper 2.0 & Helper 3.0 for AI-assisted development (and yes the Halper is intentional)
+
+---
+
+# V2.0 — stable release. V3.0 with TypeScript, Capacitor APK, and AI agent coming soon.
